@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 
 
-<title>GST Quotation by Sathish Sekar</title>
+<title>GST Quotation</title>
 
 <style>
 body{
@@ -246,7 +246,7 @@ th,td{
 <body>
 <div class="app">
 <header>
-  <h1>VST DURAIPANDI</h1>
+  <h1>VSTD COMPANY</h1>
   <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
 </header>
 
@@ -291,17 +291,17 @@ th,td{
 
   <div>
     Pkg/Fwd
-    <input id="pkg" class="yellow small" value="0">
+    <input id="pkg" class="yellow small" value="">
   </div>
 
   <div>
     Discount
-    <input id="disc" class="yellow small" value="0">
+    <input id="disc" class="yellow small" value="">
   </div>
 
   <div>
     GST %
-    <input id="gst" class="yellow small" value="18">
+    <input id="gst" class="yellow small" value="">
   </div>
 
   <div>CGST <span id="cgst">0.00</span></div>
@@ -324,7 +324,7 @@ th,td{
 
 <script>
 
-const products=["Rice","Sugar 50kg","Oil","Dal","Channa Flour","Custom"];
+const products=["Sugar","Rice","Oil","Toor Dhall","Channa Flour"];
 const STORE_KEY = "gst_quotes_history";
 
 // Generate next quotation number
@@ -407,8 +407,8 @@ function addRow(){
   <td>
     <input list="plist" class="yellow">
   </td>
-  <td><input type="number" value="0" onchange="calc()" class="yellow"></td>
-  <td><input type="number" value="0" onchange="calc()" class="yellow"></td>
+  <td><input type="number" value="" onchange="calc()" class="yellow"></td>
+  <td><input type="number" value="" onchange="calc()" class="yellow"></td>
   <td>0</td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">×</button></td>
   `;
