@@ -444,19 +444,6 @@ input[type=number] {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyA4NGdwbvS0JPR3jEpYXYIzlVFs9v3HEKQ",
-  authDomain: "gst-quote-by-sathish-sekar.firebaseapp.com",
-  databaseURL: "https://gst-quote-by-sathish-sekar-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "gst-quote-by-sathish-sekar",
-  storageBucket: "gst-quote-by-sathish-sekar.firebasestorage.app",
-  messagingSenderId: "1031085607122",
-  appId: "1:1031085607122:web:8b12cf7f19ce834760850b",
-  measurementId: "G-BS0VBLHRXB"
-};
-
-const app = initializeApp(firebaseConfig);
 const database = getDatabase(app);
 
 </script>
@@ -572,9 +559,11 @@ function saveQuotation(){
 
 qno.addEventListener("change", loadQuotation);
 // Firebase Save
-const companyRef = ref(database, "companyData");
-
-set(companyRef, JSON.parse(localStorage.getItem("gst_quotes_history")));
+function syncToCloud(){
+  const companyRef = ref(database, "companyData");
+  set(companyRef, JSON.parse(localStorage.getItem("gst_quotes_history")));
+}
+syncToCloud();
 
 // Load quotation from local storage
 function loadQuotation(){
@@ -604,15 +593,16 @@ function loadQuotation(){
   calc();
 }
 // Firebase Load
-const companyRef = ref(database, "companyData");
-
-onValue(companyRef, (snapshot) => {
-  const data = snapshot.val();
-  if(data){
-    localStorage.setItem("gst_quotes_history", JSON.stringify(data));
-  }
-});
-
+function startCloudSync(){
+  const companyRef = ref(database, "companyData");
+  onValue(companyRef, (snapshot) => {
+    const data = snapshot.val();
+    if(data){
+      localStorage.setItem("gst_quotes_history", JSON.stringify(data));
+    }
+  });
+}
+startCloudSync();
 
 // Add new row to the table
 function addRow(){
