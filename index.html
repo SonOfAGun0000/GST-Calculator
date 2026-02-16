@@ -177,6 +177,20 @@ th,td{
   border-radius: 4px;
 }
 
+.gstPresets{
+  margin-top:6px;
+  display:flex;
+  gap:6px;
+}
+.gstPresets button{
+  flex:1;
+  padding:6px;
+  font-size:13px;
+  background:#e6e6e6;
+  border:none;
+  border-radius:6px;
+}
+
 /* Icons CSS */
 .twemoji--broom {
   display: inline-block;
@@ -314,6 +328,12 @@ input[type=number] {
   <div>
     GST %
     <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+    <div class="gstPresets">
+      <button type="button" onclick="setGST(5)">5%</button>
+      <button type="button" onclick="setGST(12)">12%</button>
+      <button type="button" onclick="setGST(18)">18%</button>
+      <button type="button" onclick="setGST(28)">28%</button>
+    </div>
   </div>
 
   <div>CGST <span id="cgst">0.00</span></div>
@@ -434,6 +454,12 @@ products.forEach(p=>{
   d.appendChild(o);
 });
 document.body.appendChild(d);
+
+// GST Buttons
+function setGST(val){
+  gst.value = val;
+  calc();
+}
 
 // Calculate totals
 function calc(){
