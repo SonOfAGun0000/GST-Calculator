@@ -564,9 +564,13 @@ function saveQuotation(){
     items:rows
   };
 
-  let data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-  data.push(record);
-
+let data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+const index = data.findIndex(r => r.qno === record.qno);
+if(index !== -1){
+  data[index] = record;   // update existing
+}else{
+  data.push(record);      // new entry
+}
   localStorage.setItem(STORE_KEY, JSON.stringify(data));
 
   alert("✅ Successfully saved");
@@ -576,9 +580,12 @@ function saveQuotation(){
 qno.addEventListener("change", loadQuotation);
 // Firebase Save
 function syncToCloud(){
+  if(!window.database) return;
   const companyRef = ref(database, "companyData");
-  set(companyRef, JSON.parse(localStorage.getItem("gst_quotes_history")));
+  const data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+  set(companyRef, data);
 }
+
 
 // Load quotation from local storage
 function loadQuotation(){
