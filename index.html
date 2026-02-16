@@ -46,6 +46,30 @@ header p{
   color:#555;
 }
 
+.hamburger{
+  position:absolute;
+  top:20px;
+  right:20px;
+  font-size:22px;
+  cursor:pointer;
+}
+
+.sideMenu{
+  position:fixed;
+  top:0;
+  right:-260px;
+  width:250px;
+  height:100%;
+  background:white;
+  box-shadow:-4px 0 12px rgba(0,0,0,.2);
+  padding:20px;
+  transition:.3s;
+}
+
+.sideMenu.open{
+  right:0;
+}
+
 label{
   font-size:13px;
   font-weight:600;
@@ -273,8 +297,11 @@ input[type=number] {
 <body>
 <div class="app">
 <header>
-  <h1>VSTD COMPANY</h1>
-  <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
+  <div>
+    <h1>VSTD COMPANY</h1>
+    <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
+  </div>
+  <div class="hamburger" onclick="toggleMenu()">☰</div>
 </header>
 
 <div class="row2">
@@ -289,15 +316,19 @@ input[type=number] {
   </div>
 </div>
 
-<div class="client">
-  <label>Client Name:</label>
-  <input id="client" class="yellow">
+<div class="clientDiv">
+  <div class="client">
+    <label>Client Name:</label>
+    <input id="client" class="yellow">
+  </div>
 </div>
 
-<div class="phone">
-  <label>Phone:</label>
-  <label>+91</label>
-  <input id="phone" class="yellow" type="tel">
+<div class="phoneDiv">
+  <div class="phone">
+    <label>Phone:</label>
+    <label>+91</label>
+    <input id="phone" class="yellow" type="tel">
+  </div>
 </div>
 
 <table id="tbl">
@@ -316,16 +347,18 @@ input[type=number] {
 
   <div>Taxable Value <span id="subtotal">0.00</span></div>
 
-  <div>
-    Pkg/Fwd
-    <input id="pkg" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+  <div class="pkgDiv">
+    <div>
+      Pkg/Fwd
+      <input id="pkg" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+    </div>
   </div>
-
-  <div>
-    Discount
-    <input id="disc" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+  <div class="discDiv">
+    <div>
+      Discount
+      <input id="disc" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+    </div>
   </div>
-
   <div>
     GST %
     <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
@@ -352,14 +385,79 @@ input[type=number] {
   <button onclick="shareWhatsApp()"><span class="logos--whatsapp-icon"></span></button>
   <button onclick="openLedger()"><span class="fluent-color--history-20"></span></button>
 </div>
-
+<div id="sideMenu" class="sideMenu">
+  <button onclick="exportData()">Backup Data</button>
+  <button onclick="importData()">Import Data</button>
+  <button onclick="shareApp()">Share App</button>
+  <button onclick="checkUpdates()">Check for Updates</button>
 </div>
+</div>
+
+
 
 
 <script>
 
 const products=["Sugar","Groundnut Oil","Rice","Oil","Toor Dhall","Channa Flour"];
 const STORE_KEY = "gst_quotes_history";
+
+//Hamburger Menu Open
+function toggleMenu(){
+  document.getElementById("sideMenu").classList.toggle("open");
+}
+
+//Backup & Import JSON
+//Export
+function exportData(){
+  const data = localStorage.getItem("gst_quotes_history");
+  const blob = new Blob([data], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "gst-backup.json";
+  a.click();
+}
+
+//Import
+function importData(){
+  const input = document.createElement("input");
+  input.type="file";
+  input.accept="application/json";
+
+  input.onchange = e => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(){
+      localStorage.setItem("gst_quotes_history", reader.result);
+      alert("Data Imported Successfully");
+      location.reload();
+    }
+    reader.readAsText(file);
+  };
+
+  input.click();
+}
+
+//Share APP
+function shareApp(){
+  if(navigator.share){
+    navigator.share({
+      title:"GST Rate App by Sathish Sekar",
+      url:window.location.href
+    });
+  } else {
+    alert("Copy this link:\n" + window.location.href);
+  }
+}
+
+//check for updates
+function checkUpdates(){
+  navigator.serviceWorker.getRegistrations().then(regs=>{
+    for(let reg of regs){
+      reg.update();
+    }
+  });
+  location.reload();
+}
 
 // Generate next quotation number
 function nextQuotationNumber(){
@@ -511,6 +609,24 @@ function clearForm(){
 // Format number in Indian style
 function indian(n){
   return Number(n).toLocaleString('en-IN',{minimumFractionDigits:2});
+}
+
+// Remove empty fields
+window.addEventListener("beforeprint", function() {
+
+  togglePrintField("client", ".clientDiv");
+  togglePrintField("phone", ".phoneDiv");
+  togglePrintField("pkg", ".pkgDiv");
+  togglePrintField("disc", ".discDiv");
+
+});
+
+function togglePrintField(inputId, divClass){
+  const value = document.getElementById(inputId)?.value?.trim();
+  const div = document.querySelector(divClass);
+  if(!value && div){
+    div.style.display = "none";
+  }
 }
 
 // Share quotation via WhatsApp
