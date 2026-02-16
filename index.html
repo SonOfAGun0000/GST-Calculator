@@ -219,6 +219,18 @@ th,td{
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none'%3E%3Cpath fill='url(%23SVG3U5X9cqt)' d='M10 5.5a1 1 0 0 1 1 1V9h1.5a1 1 0 1 1 0 2H10a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1'/%3E%3Cpath fill='url(%23SVGLLiKrb3j)' d='M6.031 5.5A6 6 0 1 1 4 10a1 1 0 0 0-2 0a8 8 0 1 0 2.5-5.81V3a1 1 0 0 0-2 0v3A1.5 1.5 0 0 0 4 7.5h3a1 1 0 0 0 0-2z'/%3E%3Cdefs%3E%3ClinearGradient id='SVG3U5X9cqt' x1='8.156' x2='20.094' y1='16.45' y2='11.414' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23d373fc'/%3E%3Cstop offset='1' stop-color='%236d37cd'/%3E%3C/linearGradient%3E%3ClinearGradient id='SVGLLiKrb3j' x1='2' x2='6.295' y1='2.941' y2='20.923' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%230fafff'/%3E%3Cstop offset='1' stop-color='%230067bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/g%3E%3C/svg%3E");
 }
 
+/* Remove arrows in Chrome, Edge, Safari */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Remove arrows in Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
 @media (max-width: 420px){
   .row2{
     flex-direction: column;
@@ -291,17 +303,17 @@ th,td{
 
   <div>
     Pkg/Fwd
-    <input id="pkg" class="yellow small" value="">
+    <input id="pkg" type="number" inputmode="decimal" step="any" class="yellow small" value="">
   </div>
 
   <div>
     Discount
-    <input id="disc" class="yellow small" value="">
+    <input id="disc" type="number" inputmode="decimal" step="any" class="yellow small" value="">
   </div>
 
   <div>
     GST %
-    <input id="gst" class="yellow small" value="">
+    <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
   </div>
 
   <div>CGST <span id="cgst">0.00</span></div>
@@ -407,8 +419,8 @@ function addRow(){
   <td>
     <input list="plist" class="yellow">
   </td>
-  <td><input type="number" value="" onchange="calc()" class="yellow"></td>
-  <td><input type="number" value="" onchange="calc()" class="yellow"></td>
+  <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"></td>
+  <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"></td>
   <td>0</td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">×</button></td>
   `;
