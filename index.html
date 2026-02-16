@@ -453,6 +453,22 @@ const database = getDatabase(app);
 const products=["Sugar","Groundnut Oil","Rice","Oil","Toor Dhall","Channa Flour"];
 const STORE_KEY = "gst_quotes_history";
 
+// Auto date update
+function setTodayDate(){
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+  document.getElementById("date").value = `${dd}-${mm}-${yyyy}`;
+}
+
+//Generate Quote No.
+function generateNextQuoteNo(){
+  let history = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+  let next = history.length ? Math.max(...history.map(q => q.qno)) + 1 : 1;
+  document.getElementById("qno").value = next;
+}
+
 //Hamburger Menu 
 //Open
 function toggleMenu(){
@@ -620,6 +636,12 @@ function addRow(){
   <td>0</td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">×</button></td>
   `;
+}
+function ensureFirstRow(){
+  const tbody = document.querySelector("#tbl tbody");
+  if(tbody.children.length === 0){
+    addRow();
+  }
 }
 
 let d=document.createElement("datalist");
@@ -912,6 +934,11 @@ if ("serviceWorker" in navigator) {
 
 <!-- firebasestorage -->
 <script type="module">
+    document.addEventListener("DOMContentLoaded", function(){
+    setTodayDate();
+    generateNextQuoteNo();
+    ensureFirstRow();
+  });
   // Import the functions you need from the SDKs you need
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-analytics.js";
