@@ -186,7 +186,7 @@ th,td{
   flex:1;
   padding:6px;
   font-size:13px;
-  background:#e6e6e6;
+  background:#ff8484;
   border:none;
   border-radius:6px;
 }
@@ -257,7 +257,7 @@ input[type=number] {
 }
 
 @media print{
-  .buttons,.addProduct,.del-btn,#tbl th:nth-child(6), #tbl td:nth-child(6) {
+  .buttons,.addProduct,.del-btn,#tbl th:nth-child(6), #tbl td:nth-child(6), .gstPresets {
     display:none;
   }
   .app{
@@ -333,6 +333,7 @@ input[type=number] {
       <button type="button" onclick="setGST(12)">12%</button>
       <button type="button" onclick="setGST(18)">18%</button>
       <button type="button" onclick="setGST(28)">28%</button>
+      <button type="button" onclick="setGST(40)">40%</button>
     </div>
   </div>
 
