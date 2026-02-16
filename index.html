@@ -720,14 +720,20 @@ function indian(n){
 }
 
 // Remove empty fields
-window.addEventListener("beforeprint", function() {
+window.addEventListener("beforeprint", handlePrint);
+window.addEventListener("afterprint", restorePrint);
 
+function handlePrint(){
   togglePrintField("client", ".clientDiv");
   togglePrintField("phone", ".phoneDiv");
   togglePrintField("pkg", ".pkgDiv");
   togglePrintField("disc", ".discDiv");
+}
 
-});
+function restorePrint(){
+  document.querySelectorAll(".clientDiv, .phoneDiv, .pkgDiv, .discDiv")
+    .forEach(div => div.style.display = "");
+}
 
 function togglePrintField(inputId, divClass){
   const value = document.getElementById(inputId)?.value?.trim();
@@ -736,6 +742,7 @@ function togglePrintField(inputId, divClass){
     div.style.display = "none";
   }
 }
+
 
 // Share quotation via WhatsApp
 function shareWhatsApp(){
