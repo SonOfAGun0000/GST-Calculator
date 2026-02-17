@@ -54,15 +54,21 @@ header p{
   right:10px;
   font-size:22px;
   cursor:pointer;
+  transition: transform .25s ease, opacity .25s ease;
+}
+
+.hamburger:active{
+  transform: scale(0.92) rotate(-8deg);
 }
 
 .menuOverlay{
   position:fixed;
   inset:0;
-  background:rgba(0,0,0,.4);
+  background:rgba(15, 23, 42, .32);
   opacity:0;
   pointer-events:none;
-  transition:.3s;
+  transition:opacity .35s ease;
+  backdrop-filter: blur(2px);
   z-index:998;
 }
 
@@ -74,14 +80,15 @@ header p{
 .sideMenu{
   position:fixed;
   top:0;
-  right:100%;
+  right:0;
   width:260px;
   height:100%;
-  background:#ffffffd1;
+  background:#ffffffee;
   border-left:3px solid #991b2b;
   box-shadow:-5px 0 20px rgba(0,0,0,.2);
   padding:20px;
-  transition:.3s;
+  transform:translateX(110%);
+  transition:transform .42s cubic-bezier(.22,.8,.25,1), box-shadow .42s ease;
   z-index:999;
   display:flex;
   flex-direction:column;
@@ -89,7 +96,8 @@ header p{
 }
 
 .sideMenu.open{
-  right:0;
+  transform:translateX(0);
+  box-shadow:-14px 0 36px rgba(0,0,0,.24);
 }
 
 .menuHeader{
@@ -231,6 +239,27 @@ th,td{
   border:none;
   border-radius:6px;
 }
+
+.buttons button,
+.addProduct,
+.sideMenu button,
+.del-btn{
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+
+.buttons button:active,
+.addProduct:active,
+.sideMenu button:active,
+.del-btn:active{
+  animation: tapBounce .18s ease;
+  filter: brightness(0.95);
+}
+
+@keyframes tapBounce{
+  0% { transform: scale(1); }
+  45% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
 .del-btn {
   background: none;
   border: none;
@@ -247,6 +276,12 @@ th,td{
   border-radius: 4px;
 }
 
+.gst-row{
+  display:flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap:12px;
+}
 .gstPresets{
   margin-top:6px;
   display:flex;
@@ -406,16 +441,14 @@ input[type=number] {
       <input id="disc" type="number" inputmode="decimal" step="any" class="yellow small" value="">
     </div>
   </div>
-  <div>
-    GST %
-    <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
+  <div class="gst-row">
     <div class="gstPresets">
       <button type="button" onclick="setGST(5)">5%</button>
-      <button type="button" onclick="setGST(12)">12%</button>
       <button type="button" onclick="setGST(18)">18%</button>
       <button type="button" onclick="setGST(28)">28%</button>
-      <button type="button" onclick="setGST(40)">40%</button>
     </div>
+    GST %
+    <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
   </div>
 
   <div>CGST <span id="cgst">0.00</span></div>
@@ -459,10 +492,17 @@ document.addEventListener("DOMContentLoaded", function(){
 // Auto date update
 function setTodayDate(){
   const today = new Date();
-  const dd = String(today.getDate()).padStart(2, '0');
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const yyyy = today.getFullYear();
-  document.getElementById("date").value = `${dd}-${mm}-${yyyy}`;
+  document.getElementById("date").value = today.toISOString().slice(0, 10);
+}
+
+function toISODateString(value){
+  if(!value) return "";
+  if(/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if(/^\d{2}-\d{2}-\d{4}$/.test(value)){
+    const [dd, mm, yyyy] = value.split("-");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return "";
 }
 
 //Generate Quote No.
@@ -559,7 +599,7 @@ function saveQuotation(){
 
   let record={
     qno:+qno.value,
-    date:date.value,
+    date:toISODateString(date.value),
     client:client.value,
     phone:phone.value,
     pkg:+pkg.value||0,
@@ -584,10 +624,10 @@ if(index !== -1){
 qno.addEventListener("change", loadQuotation);
 // Firebase Save
 function syncToCloud(){
-  if(!window.database) return;
-  const companyRef = ref(database, "companyData");
+  if(!window.database || !window.ref || !window.set) return;
+  const companyRef = window.ref(window.database, "companyData");
   const data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-  set(companyRef, data);
+  window.set(companyRef, data);
 }
 
 
@@ -601,7 +641,7 @@ function loadQuotation(){
 
   client.value = rec.client;
   phone.value  = rec.phone;
-  date.value   = rec.date;
+  date.value   = toISODateString(rec.date);
   pkg.value    = rec.pkg;
   disc.value   = rec.disc;
   gst.value    = rec.gst;
@@ -620,15 +660,19 @@ function loadQuotation(){
 }
 // Firebase Load
 function startCloudSync(){
-  const companyRef = ref(database, "companyData");
-  onValue(companyRef, (snapshot) => {
+  if(!window.database || !window.ref || !window.onValue) return false;
+  const companyRef = window.ref(window.database, "companyData");
+  window.onValue(companyRef, (snapshot) => {
     const data = snapshot.val();
     if(data){
       localStorage.setItem("gst_quotes_history", JSON.stringify(data));
     }
   });
+  return true;
 }
-startCloudSync();
+if(!startCloudSync()){
+  window.addEventListener("firebase-ready", startCloudSync, { once: true });
+}
 
 // Add new row to the table
 function addRow(){
@@ -867,6 +911,7 @@ Product:
 // Ledger modal
   function openLedger(){
   document.getElementById("ledgerModal").style.display="block";
+  document.getElementById("fDate").value = new Date().toISOString().slice(0, 10);
   renderLedger();
 }
 // Close ledger modal
@@ -933,7 +978,7 @@ function filterLedger(){
 
     let ok=true;
 
-    if(d && r.date!=d) ok=false;
+    if(d && toISODateString(r.date) !== d) ok=false;
 
     if(c && !r.client.toLowerCase().includes(c)) ok=false;
 
@@ -965,15 +1010,10 @@ if ("serviceWorker" in navigator) {
 }
 </script>
 
-<script>
-  // Import the functions you need from the SDKs you need
+<script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
 
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
   const firebaseConfig = {
     apiKey: "AIzaSyA4NGdwbvS0JPR3jEpYXYIzlVFs9v3HEKQ",
     authDomain: "gst-quote-by-sathish-sekar.firebaseapp.com",
@@ -985,9 +1025,8 @@ if ("serviceWorker" in navigator) {
     measurementId: "G-BS0VBLHRXB"
   };
 
-  // Initialize Firebase
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
+  const database = getDatabase(app);
 
 
 // expose globally
@@ -995,6 +1034,7 @@ window.database = database;
 window.ref = ref;
 window.set = set;
 window.onValue = onValue;
+window.dispatchEvent(new Event("firebase-ready"));
 
 </script>
 </body>
