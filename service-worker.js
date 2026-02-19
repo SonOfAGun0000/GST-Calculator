@@ -1,7 +1,10 @@
-const CACHE_NAME = "gst-quote";
+const CACHE_NAME = "gst-quote-v3";
 const FILES_TO_CACHE = [
   "./",
-  "./quote.html",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./sync.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png"
@@ -32,14 +35,32 @@ self.addEventListener("activate", event => {
 });
 
 self.addEventListener("fetch", event => {
-  event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        return caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, response.clone());
+  const { request } = event;
+
+  // Always try network first for navigations to avoid serving stale app shell.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put("./index.html", copy));
           return response;
-        });
-      })
-      .catch(() => caches.match(event.request))
+        })
+        .catch(async () => {
+          return (await caches.match("./index.html")) || caches.match(request);
+        })
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(response => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+        return response;
+      });
+    })
   );
 });
