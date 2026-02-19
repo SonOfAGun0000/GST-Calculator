@@ -347,6 +347,7 @@ input[type=number]::-webkit-inner-spin-button {
 
 /* Remove arrows in Firefox */
 input[type=number] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
@@ -364,6 +365,15 @@ input[type=number] {
 @media print{
   .buttons,.addProduct,.del-btn,#tbl th:nth-child(6), #tbl td:nth-child(6), .gstPresets {
     display:none;
+  }
+  .hamburger,
+  #menuOverlay,
+  #sideMenu,
+  #ledgerModal{
+    display:none !important;
+    visibility:hidden !important;
+    opacity:0 !important;
+    pointer-events:none !important;
   }
   .app{
     box-shadow:none;
@@ -389,7 +399,7 @@ input[type=number] {
 <div class="row2">
   <div class="quoteno">
     <label>Quotation No</label>
-    <input id="qno" class="yellow">
+    <input id="qno" class="yellow" readonly>
   </div>
 
   <div class="date">
@@ -461,7 +471,7 @@ input[type=number] {
 <div class="buttons">
   <button onclick="saveQuotation()"><span class="glyphs-poly--save"></span></button>
   <button onclick="clearForm()"><span class="twemoji--broom"></span></button>
-  <button onclick="window.print()"><span class="vscode-icons--file-type-pdf2"></span></button>
+  <button onclick="triggerPrint()"><span class="vscode-icons--file-type-pdf2"></span></button>
   <button onclick="shareWhatsApp()"><span class="logos--whatsapp-icon"></span></button>
   <button onclick="openLedger()"><span class="fluent-color--history-20"></span></button>
 </div>
@@ -482,12 +492,85 @@ input[type=number] {
 <script>
 const products=["Sugar","Groundnut Oil","Rice","Oil","Toor Dhall","Channa Flour"];
 const STORE_KEY = "gst_quotes_history";
+const CLOUD_ROOT = "companyData";
+const CLOUD_QUOTES = `${CLOUD_ROOT}/quotes`;
+const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastQno`;
+let cloudSyncStarted = false;
+let initialCloudSyncDone = false;
 
 document.addEventListener("DOMContentLoaded", function(){
     setTodayDate();
     generateNextQuoteNo();
     ensureFirstRow();
   });
+
+function normalizeHistory(list){
+  if(!Array.isArray(list)) return [];
+  return list
+    .filter(r => r && typeof r === "object" && Number(r.qno) > 0)
+    .map(r => ({ ...r, qno: Number(r.qno) }))
+    .sort((a,b) => a.qno - b.qno);
+}
+
+function getLocalHistory(){
+  try{
+    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+    return normalizeHistory(parsed);
+  }catch{
+    return [];
+  }
+}
+
+function setLocalHistory(data){
+  localStorage.setItem(STORE_KEY, JSON.stringify(normalizeHistory(data)));
+}
+
+function nextQnoFromList(data){
+  const max = data.reduce((m, r) => Math.max(m, Number(r.qno) || 0), 0);
+  return max + 1;
+}
+
+function refreshNextQno(){
+  document.getElementById("qno").value = nextQnoFromList(getLocalHistory());
+}
+
+function parseCloudHistory(raw){
+  if(Array.isArray(raw)) return normalizeHistory(raw);
+  if(!raw || typeof raw !== "object") return [];
+  if(Array.isArray(raw.quotes)) return normalizeHistory(raw.quotes);
+  if(raw.quotes && typeof raw.quotes === "object"){
+    return normalizeHistory(Object.values(raw.quotes));
+  }
+  return [];
+}
+
+function mergeHistory(localHistory, cloudHistory){
+  const merged = new Map();
+  [...cloudHistory, ...localHistory].forEach(r => {
+    if(!r || !Number(r.qno)) return;
+    const qno = Number(r.qno);
+    const existing = merged.get(qno);
+    if(!existing){
+      merged.set(qno, { ...r, qno });
+      return;
+    }
+    const existingSaved = Number(existing.savedAt) || 0;
+    const candidateSaved = Number(r.savedAt) || 0;
+    if(candidateSaved >= existingSaved){
+      merged.set(qno, { ...r, qno });
+    }
+  });
+  return [...merged.values()].sort((a,b) => a.qno - b.qno);
+}
+
+function toCloudPayload(history){
+  const quotes = {};
+  history.forEach(r => { quotes[r.qno] = r; });
+  return {
+    quotes,
+    meta: { lastQno: nextQnoFromList(history) - 1 }
+  };
+}
 
 // Auto date update
 function setTodayDate(){
@@ -507,8 +590,8 @@ function toISODateString(value){
 
 //Generate Quote No.
 function generateNextQuoteNo(){
-  let history = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-  let next = history.length ? Math.max(...history.map(q => q.qno)) + 1 : 1;
+  let history = getLocalHistory();
+  let next = nextQnoFromList(history);
   document.getElementById("qno").value = next;
 }
 
@@ -522,6 +605,12 @@ function toggleMenu(){
 function closeMenu(){
   document.getElementById("sideMenu").classList.remove("open");
   document.getElementById("menuOverlay").classList.remove("active");
+}
+
+function triggerPrint(){
+  closeMenu();
+  closeLedger();
+  window.print();
 }
 
 
@@ -580,12 +669,11 @@ function checkUpdates(){
 
 // Generate next quotation number
 function nextQuotationNumber(){
-  let data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-  return data.length ? (data[data.length-1].qno + 1) : 1;
+  return nextQnoFromList(getLocalHistory());
 }
 
 // Save quotation to local storage
-function saveQuotation(){
+async function saveQuotation(){
   let rows=[];
   document.querySelectorAll("#tbl tbody tr").forEach(r=>{
     let name=r.cells[1].querySelector("input").value;
@@ -597,54 +685,76 @@ function saveQuotation(){
     }
   });
 
-  let record={
-    qno:+qno.value,
-    date:toISODateString(date.value),
-    client:client.value,
-    phone:phone.value,
-    pkg:+pkg.value||0,
-    disc:+disc.value||0,
-    gst:+gst.value||0,
-    items:rows
+  if(rows.length === 0){
+    alert("Add at least one product before saving");
+    return;
+  }
+
+  let recordBase={
+    date:toISODateString(document.getElementById("date").value),
+    client:document.getElementById("client").value,
+    phone:document.getElementById("phone").value,
+    pkg:+document.getElementById("pkg").value||0,
+    disc:+document.getElementById("disc").value||0,
+    gst:+document.getElementById("gst").value||0,
+    items:rows,
+    savedAt: Date.now()
   };
 
-let data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-const index = data.findIndex(r => r.qno === record.qno);
-if(index !== -1){
-  data[index] = record;   // update existing
-}else{
-  data.push(record);      // new entry
-}
-  localStorage.setItem(STORE_KEY, JSON.stringify(data));
+  let data = getLocalHistory();
+  let newQno = nextQnoFromList(data);
 
-  alert("✅ Successfully saved");
-  syncToCloud();
+  if(window.database && window.ref && window.set && window.runTransaction){
+    try{
+      const tx = await window.runTransaction(
+        window.ref(window.database, CLOUD_LAST_QNO),
+        current => (Number(current) || 0) + 1
+      );
+      if(!tx.committed){
+        throw new Error("Failed to allocate quotation number");
+      }
+      newQno = Number(tx.snapshot.val()) || newQno;
+      const cloudRecord = { ...recordBase, qno: newQno };
+      await window.set(window.ref(window.database, `${CLOUD_QUOTES}/${newQno}`), cloudRecord);
+    }catch(err){
+      console.error("Cloud save failed, using local-only save:", err);
+    }
+  }
+
+  const record = { ...recordBase, qno: newQno };
+  data = data.filter(r => Number(r.qno) !== newQno);
+  data.push(record);
+  setLocalHistory(data);
+  if(document.getElementById("ledgerModal").style.display === "block"){
+    renderLedger();
+  }
+  refreshNextQno();
+  alert(`Successfully saved (Quotation No: ${newQno})`);
 }
 
-qno.addEventListener("change", loadQuotation);
+// Intentionally no auto-load on qno input change; ledger controls loading.
 // Firebase Save
 function syncToCloud(){
-  if(!window.database || !window.ref || !window.set) return;
-  const companyRef = window.ref(window.database, "companyData");
-  const data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-  window.set(companyRef, data);
+  // Deprecated full-overwrite sync; kept as no-op for backward compatibility.
+  return;
 }
 
 
 // Load quotation from local storage
 function loadQuotation(){
 
-  let data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+  let data = getLocalHistory();
 
-  let rec = data.find(x => x.qno == qno.value);
+  const qnoInput = document.getElementById("qno");
+  let rec = data.find(x => x.qno == qnoInput.value);
   if(!rec) return;
 
-  client.value = rec.client;
-  phone.value  = rec.phone;
-  date.value   = toISODateString(rec.date);
-  pkg.value    = rec.pkg;
-  disc.value   = rec.disc;
-  gst.value    = rec.gst;
+  document.getElementById("client").value = rec.client;
+  document.getElementById("phone").value = rec.phone;
+  document.getElementById("date").value = toISODateString(rec.date);
+  document.getElementById("pkg").value = rec.pkg;
+  document.getElementById("disc").value = rec.disc;
+  document.getElementById("gst").value = rec.gst;
 
   document.querySelector("#tbl tbody").innerHTML="";
 
@@ -660,12 +770,40 @@ function loadQuotation(){
 }
 // Firebase Load
 function startCloudSync(){
-  if(!window.database || !window.ref || !window.onValue) return false;
-  const companyRef = window.ref(window.database, "companyData");
-  window.onValue(companyRef, (snapshot) => {
-    const data = snapshot.val();
-    if(data){
-      localStorage.setItem("gst_quotes_history", JSON.stringify(data));
+  if(cloudSyncStarted) return true;
+  if(!window.database || !window.ref || !window.onValue || !window.set) return false;
+  cloudSyncStarted = true;
+
+  const companyRef = window.ref(window.database, CLOUD_ROOT);
+  window.onValue(companyRef, async (snapshot) => {
+    try{
+      const raw = snapshot.val();
+      const cloudHistory = parseCloudHistory(raw);
+      const localHistory = getLocalHistory();
+      const merged = mergeHistory(localHistory, cloudHistory);
+
+      setLocalHistory(merged);
+
+      const cloudLastQno = Number(raw?.meta?.lastQno) || 0;
+      const mergedLastQno = nextQnoFromList(merged) - 1;
+      const shouldWriteBack =
+        cloudHistory.length !== merged.length ||
+        Array.isArray(raw) ||
+        cloudLastQno < mergedLastQno;
+
+      if(shouldWriteBack){
+        await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
+      }
+
+      initialCloudSyncDone = true;
+      refreshNextQno();
+      if(document.getElementById("ledgerModal").style.display === "block"){
+        renderLedger();
+      }
+    }catch(err){
+      console.error("Cloud sync merge failed:", err);
+      initialCloudSyncDone = true;
+      refreshNextQno();
     }
   });
   return true;
@@ -851,10 +989,6 @@ if(phone){
 }
 }
 
-document.getElementById("date").valueAsDate = new Date();
-document.getElementById("qno").value = nextQuotationNumber();
-
-addRow();
 calc();
 
 </script>
@@ -920,7 +1054,7 @@ function closeLedger(){
 }
 // Get history from local storage
 function getHistory(){
-  return JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+  return getLocalHistory();
 }
 // Open quotation from ledger
 function renderLedger(list=null){
@@ -962,9 +1096,16 @@ function deleteLedgerEntry(qno){
   let data = getHistory();
   data = data.filter(r => r.qno !== qno);
 
-  localStorage.setItem(STORE_KEY, JSON.stringify(data));
+  setLocalHistory(data);
+  syncDeletedEntryToCloud(qno);
 
   renderLedger();
+  refreshNextQno();
+}
+
+function syncDeletedEntryToCloud(qno){
+  if(!window.database || !window.ref || !window.set) return;
+  window.set(window.ref(window.database, `${CLOUD_QUOTES}/${qno}`), null);
 }
 
 // Filter ledger entries
@@ -995,12 +1136,12 @@ function filterLedger(){
 // Open quotation from ledger
 function openFromLedger(no){
   closeLedger();
-  qno.value=no;
+  document.getElementById("qno").value = no;
   loadQuotation();
 }
 // Export ledger to PDF
 function exportLedgerPDF(){
-  window.print();
+  triggerPrint();
 }
 </script>
 <!-- Service WORKER -->
@@ -1012,7 +1153,7 @@ if ("serviceWorker" in navigator) {
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
+  import { getDatabase, ref, set, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyA4NGdwbvS0JPR3jEpYXYIzlVFs9v3HEKQ",
@@ -1034,6 +1175,7 @@ window.database = database;
 window.ref = ref;
 window.set = set;
 window.onValue = onValue;
+window.runTransaction = runTransaction;
 window.dispatchEvent(new Event("firebase-ready"));
 
 </script>
