@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>GST Folio Master</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="page-folio">
+<div class="app">
+  <header>
+    <div>
+      <h1>VSTD COMPANY</h1>
+      <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
+    </div>
+    <div class="hamburger" onclick="toggleMenu()">&#9776;</div>
+  </header>
+  <p class="docType docType-folio">FOLIO MASTER</p>
+
+  <div class="masterCard">
+    <div class="masterGrid">
+      <div>
+        <label>Name</label>
+        <input id="foName" class="yellow" placeholder="Customer / Supplier name">
+      </div>
+      <div>
+        <label>Type</label>
+        <select id="foType" class="yellow">
+          <option value="Customer">Customer</option>
+          <option value="Supplier">Supplier</option>
+          <option value="Both">Both</option>
+        </select>
+      </div>
+      <div>
+        <label>Phone</label>
+        <input id="foPhone" class="yellow" type="tel" placeholder="+91...">
+      </div>
+      <div>
+        <label>Alternate Phone</label>
+        <input id="foAltPhone" class="yellow" type="tel" placeholder="Optional">
+      </div>
+      <div>
+        <label>GSTIN</label>
+        <input id="foGstin" class="yellow" placeholder="Optional">
+      </div>
+      <div style="grid-column:1 / -1;">
+        <label>Address</label>
+        <textarea id="foAddress" class="yellow" rows="3" placeholder="Optional"></textarea>
+      </div>
+    </div>
+    <div class="buttons masterActions">
+      <button onclick="saveFolio()">Save</button>
+      <button onclick="clearFolioForm()">Clear</button>
+      <button onclick="exportData()">Backup</button>
+      <button onclick="importData()">Import</button>
+    </div>
+    <div id="foCount" class="masterCount"></div>
+    <table id="foTable" class="masterTable">
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Phone</th>
+          <th>GSTIN</th>
+          <th>Edit</th>
+          <th>Del</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>
+  <div id="sideMenu" class="sideMenu">
+    <div class="menuHeader">
+      <span>Menu</span>
+      <button onclick="closeMenu()">&times;</button>
+    </div>
+    <button onclick="location.href='index.html'">Quotation Entry</button>
+    <button onclick="location.href='purchase-order.html'">Purchase Order</button>
+    <button onclick="location.href='delivery-challan.html'">Delivery Challan</button>
+    <button onclick="location.href='product-master.html'">Product Master</button>
+    <button onclick="location.href='folio-master.html'">Folio Master</button>
+    <hr class="menuSeparator">
+    <button onclick="shareApp()">Share App</button>
+    <button onclick="checkUpdates()">Check for Updates</button>
+  </div>
+</div>
+<div class="printContact">
+  If you have any questions or doubts about this folio master please contact - Kasi Anandan | +91 98946 99090
+</div>
+<script src="folio-master.js" defer></script>
+<script type="module" src="sync.js"></script>
+</body>
+</html>

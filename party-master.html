@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>GST Party Master</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="page-party">
+<div class="app app-placeholder">
+  <header>
+    <div>
+      <h1>VSTD COMPANY</h1>
+      <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
+    </div>
+    <div class="hamburger" onclick="toggleMenu()">&#9776;</div>
+  </header>
+  <p class="docType docType-party">PARTY MASTER</p>
+  <div class="placeholderCard">
+    <h2>Party Master Module</h2>
+    <p>This page is ready for supplier and customer master records.</p>
+    <p>Cloud-backed CRUD will be added in the next step.</p>
+  </div>
+  <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>
+  <div id="sideMenu" class="sideMenu">
+    <div class="menuHeader">
+      <span>Menu</span>
+      <button onclick="closeMenu()">&times;</button>
+    </div>
+    <button onclick="location.href='index.html'">Quotation Entry</button>
+    <button onclick="location.href='purchase-order.html'">Purchase Order</button>
+    <button onclick="location.href='delivery-challan.html'">Delivery Challan</button>
+    <button onclick="location.href='product-master.html'">Product Master</button>
+    <button onclick="location.href='folio-master.html'">Folio Master</button>
+    <hr class="menuSeparator">
+    <button onclick="alert('Backup will be added with this module.')">Backup Data</button>
+    <button onclick="alert('Import will be added with this module.')">Import Data</button>
+    <button onclick="shareApp()">Share App</button>
+    <button onclick="checkUpdates()">Check for Updates</button>
+  </div>
+</div>
+<div class="printContact">
+  If you have any questions or doubts about this party master please contact - Kasi Anandan | +91 98946 99090
+</div>
+<script>
+function toggleMenu(){
+  document.getElementById("sideMenu").classList.add("open");
+  document.getElementById("menuOverlay").classList.add("active");
+}
+function closeMenu(){
+  document.getElementById("sideMenu").classList.remove("open");
+  document.getElementById("menuOverlay").classList.remove("active");
+}
+function shareApp(){
+  if(navigator.share){
+    navigator.share({ title:"VSTD Company", url:window.location.href });
+  }else{
+    alert("Copy this link:\n" + window.location.href);
+  }
+}
+function checkUpdates(){
+  location.reload();
+}
+</script>
+</body>
+</html>

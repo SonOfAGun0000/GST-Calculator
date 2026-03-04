@@ -4,11 +4,11 @@ const products = (() => {
   const names = productCatalog.map(r => r.name).filter(Boolean);
   return names.length ? [...new Set(names)] : defaultProducts;
 })();
-const folioAllowedTypes = new Set(["customer", "both"]);
-const STORE_KEY = "gst_quotes_history";
-const CLOUD_ROOT = "companyData";
-const CLOUD_QUOTES = `${CLOUD_ROOT}/quotes`;
-const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastQno`;
+const folioAllowedTypes = new Set(["supplier", "both"]);
+const STORE_KEY = "gst_purchase_orders_history";
+const CLOUD_ROOT = "companyPurchaseOrders";
+const CLOUD_QUOTES = `${CLOUD_ROOT}/orders`;
+const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastPono`;
 let cloudSyncStarted = false;
 let holdCurrentQno = false;
 let selectedFolio = null;
@@ -69,9 +69,9 @@ function refreshNextQno(force = false){
 function parseCloudHistory(raw){
   if(Array.isArray(raw)) return normalizeHistory(raw);
   if(!raw || typeof raw !== "object") return [];
-  if(Array.isArray(raw.quotes)) return normalizeHistory(raw.quotes);
-  if(raw.quotes && typeof raw.quotes === "object"){
-    return normalizeHistory(Object.values(raw.quotes));
+  if(Array.isArray(raw.orders)) return normalizeHistory(raw.orders);
+  if(raw.orders && typeof raw.orders === "object"){
+    return normalizeHistory(Object.values(raw.orders));
   }
   return [];
 }
@@ -96,11 +96,11 @@ function mergeHistory(localHistory, cloudHistory){
 }
 
 function toCloudPayload(history){
-  const quotes = {};
-  history.forEach(r => { quotes[r.qno] = r; });
+  const orders = {};
+  history.forEach(r => { orders[r.qno] = r; });
   return {
-    quotes,
-    meta: { lastQno: nextQnoFromList(history) - 1 }
+    orders,
+    meta: { lastPono: nextQnoFromList(history) - 1 }
   };
 }
 
@@ -438,11 +438,11 @@ function triggerPrint(){
 //Backup & Import JSON
 //Export
 function exportData(){
-  const data = localStorage.getItem("gst_quotes_history");
+  const data = localStorage.getItem(STORE_KEY);
   const blob = new Blob([data], {type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "gst-backup.json";
+  a.download = "purchase-order-backup.json";
   a.click();
 }
 
@@ -456,7 +456,7 @@ function importData(){
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onload = function(){
-      localStorage.setItem("gst_quotes_history", reader.result);
+      localStorage.setItem(STORE_KEY, reader.result);
       alert("Data Imported Successfully");
       location.reload();
     }
@@ -489,7 +489,7 @@ function checkUpdates(){
 }
 
 // Generate next quotation number
-function nextQuotationNumber(){
+function nextPurchaseOrderNumber(){
   return nextQnoFromList(getLocalHistory());
 }
 
@@ -525,6 +525,9 @@ async function saveQuotation(){
     client:document.getElementById("client").value,
     phone:document.getElementById("phone").value,
     folio: resolveCurrentFolio(),
+    reqBy:document.getElementById("reqBy").value,
+    shipVia:document.getElementById("shipVia").value,
+    shipTerms:document.getElementById("shipTerms").value,
     pkg:+document.getElementById("pkg").value||0,
     disc:+document.getElementById("disc").value||0,
     gst:+document.getElementById("gst").value||0,
@@ -561,7 +564,7 @@ async function saveQuotation(){
   }
   document.getElementById("qno").value = newQno;
   holdCurrentQno = true;
-  alert(`Successfully saved (Quotation No: ${newQno})`);
+  alert(`Successfully saved (PO No: ${newQno})`);
 }
 
 document.getElementById("qno").addEventListener("change", () => {
@@ -587,6 +590,9 @@ function loadQuotation(){
   document.getElementById("client").value = rec.client;
   document.getElementById("phone").value = rec.phone;
   selectedFolio = normalizeFolioRecord(rec.folio) || findFolioByName(rec.client);
+  document.getElementById("reqBy").value = rec.reqBy || "";
+  document.getElementById("shipVia").value = rec.shipVia || "";
+  document.getElementById("shipTerms").value = rec.shipTerms || "";
   document.getElementById("date").value = toISODateString(rec.date);
   document.getElementById("pkg").value = rec.pkg;
   document.getElementById("disc").value = rec.disc;
@@ -625,12 +631,12 @@ function startCloudSync(){
 
       setLocalHistory(merged);
 
-      const cloudLastQno = Number(raw?.meta?.lastQno) || 0;
-      const mergedLastQno = nextQnoFromList(merged) - 1;
+      const cloudLastPono = Number(raw?.meta?.lastPono) || 0;
+      const mergedLastPono = nextQnoFromList(merged) - 1;
       const shouldWriteBack =
         cloudHistory.length !== merged.length ||
         Array.isArray(raw) ||
-        cloudLastQno < mergedLastQno;
+        cloudLastPono < mergedLastPono;
 
       if(shouldWriteBack){
         await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
@@ -758,6 +764,9 @@ function handlePrint(){
   renderPrintPartyDetails();
   togglePrintField("client", ".clientDiv");
   togglePrintField("phone", ".phoneDiv");
+  togglePrintField("reqBy", ".reqByDiv");
+  togglePrintField("shipVia", ".shipViaDiv");
+  togglePrintField("shipTerms", ".shipTermsDiv");
   togglePrintField("pkg", ".pkgDiv");
   togglePrintField("disc", ".discDiv");
 }
@@ -769,7 +778,7 @@ function restorePrint(){
     box.style.display = "";
     box.innerHTML = "";
   }
-  document.querySelectorAll(".clientDiv, .phoneDiv, .pkgDiv, .discDiv")
+  document.querySelectorAll(".clientDiv, .phoneDiv, .reqByDiv, .shipViaDiv, .shipTermsDiv, .pkgDiv, .discDiv")
     .forEach(div => div.style.display = "");
 }
 
@@ -794,12 +803,19 @@ function shareWhatsApp(){
     return `${parts[2]}-${parts[1]}-${parts[0]}`;
   }
 
-  let clientName = document.getElementById("client").value || "Customer";
+  let clientName = document.getElementById("client").value || "Supplier";
   let dateVal = formatDate(document.getElementById("date").value);
+  let reqBy = document.getElementById("reqBy").value || "";
+  let shipVia = document.getElementById("shipVia").value || "";
+  let shipTerms = document.getElementById("shipTerms").value || "";
 
   let msg = `Hi, M/s ${clientName},\n`;
-  msg += `Quote: -\n`;
+  msg += `Purchase Order: -\n`;
   msg += `Date: ${dateVal}\n\n`;
+  if(reqBy) msg += `Requisitioner: ${reqBy}\n`;
+  if(shipVia) msg += `Ship Via: ${shipVia}\n`;
+  if(shipTerms) msg += `Shipping Terms: ${shipTerms}\n`;
+  if(reqBy || shipVia || shipTerms) msg += `\n`;
 
   let subtotal = 0;
 
@@ -926,7 +942,7 @@ function updateLedgerPrintFilters(){
 
   const parts = [];
   if(d) parts.push(`Date: ${formatLedgerDate(d)}`);
-  if(c) parts.push(`Customer: ${c}`);
+  if(c) parts.push(`Supplier: ${c}`);
   if(p) parts.push(`Product: ${p}`);
 
   if(parts.length === 0){
@@ -996,4 +1012,5 @@ document.addEventListener("keydown", e => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./service-worker.js');
 }
+
 

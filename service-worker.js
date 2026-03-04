@@ -1,9 +1,20 @@
-const CACHE_NAME = "gst-quote-v3";
+const CACHE_NAME = "gst-quote-v4";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",
+  "./purchase-order.html",
+  "./delivery-challan.html",
+  "./product-master.html",
+  "./folio-master.html",
+  "./party-master.html",
+  "./item-master.html",
   "./styles.css",
   "./app.js",
+  "./purchase-order.js",
+  "./delivery-challan.js",
+  "./product-master.js",
+  "./folio-master.js",
+  "./item-master.js",
   "./sync.js",
   "./manifest.json",
   "./icon-192.png",
@@ -13,9 +24,7 @@ const FILES_TO_CACHE = [
 self.addEventListener("install", event => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(FILES_TO_CACHE);
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(FILES_TO_CACHE))
   );
 });
 
@@ -24,9 +33,7 @@ self.addEventListener("activate", event => {
     caches.keys().then(keys => {
       return Promise.all(
         keys.map(key => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
+          if (key !== CACHE_NAME) return caches.delete(key);
         })
       );
     })
@@ -37,17 +44,16 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const { request } = event;
 
-  // Always try network first for navigations to avoid serving stale app shell.
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then(response => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put("./index.html", copy));
+          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
           return response;
         })
         .catch(async () => {
-          return (await caches.match("./index.html")) || caches.match(request);
+          return (await caches.match(request)) || caches.match("./index.html");
         })
     );
     return;

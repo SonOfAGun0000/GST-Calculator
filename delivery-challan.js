@@ -4,11 +4,11 @@ const products = (() => {
   const names = productCatalog.map(r => r.name).filter(Boolean);
   return names.length ? [...new Set(names)] : defaultProducts;
 })();
-const folioAllowedTypes = new Set(["customer", "both"]);
-const STORE_KEY = "gst_quotes_history";
-const CLOUD_ROOT = "companyData";
-const CLOUD_QUOTES = `${CLOUD_ROOT}/quotes`;
-const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastQno`;
+const folioAllowedTypes = new Set(["customer", "supplier", "both"]);
+const STORE_KEY = "gst_delivery_challans_history";
+const CLOUD_ROOT = "companyDeliveryChallans";
+const CLOUD_QUOTES = `${CLOUD_ROOT}/challans`;
+const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastDcno`;
 let cloudSyncStarted = false;
 let holdCurrentQno = false;
 let selectedFolio = null;
@@ -69,9 +69,9 @@ function refreshNextQno(force = false){
 function parseCloudHistory(raw){
   if(Array.isArray(raw)) return normalizeHistory(raw);
   if(!raw || typeof raw !== "object") return [];
-  if(Array.isArray(raw.quotes)) return normalizeHistory(raw.quotes);
-  if(raw.quotes && typeof raw.quotes === "object"){
-    return normalizeHistory(Object.values(raw.quotes));
+  if(Array.isArray(raw.challans)) return normalizeHistory(raw.challans);
+  if(raw.challans && typeof raw.challans === "object"){
+    return normalizeHistory(Object.values(raw.challans));
   }
   return [];
 }
@@ -96,11 +96,11 @@ function mergeHistory(localHistory, cloudHistory){
 }
 
 function toCloudPayload(history){
-  const quotes = {};
-  history.forEach(r => { quotes[r.qno] = r; });
+  const challans = {};
+  history.forEach(r => { challans[r.qno] = r; });
   return {
-    quotes,
-    meta: { lastQno: nextQnoFromList(history) - 1 }
+    challans,
+    meta: { lastDcno: nextQnoFromList(history) - 1 }
   };
 }
 
@@ -205,40 +205,8 @@ function applyProductSelection(input, row){
 
   input.value = rec.name;
   input.dataset.unit = rec.unit || "";
-  input.dataset.gst = String(rec.gst || "");
   input.dataset.code = rec.code || "";
-
-  if(row?.cells?.[3]){
-    const rateInput = row.cells[3].querySelector("input");
-    if(rateInput && !(Number(rateInput.value) > 0) && rec.rate > 0){
-      rateInput.value = rec.rate;
-    }
-  }
-
-  applyAutoGSTFromRows();
   return rec;
-}
-
-function applyAutoGSTFromRows(){
-  const gstInputEl = document.getElementById("gst");
-  if(!gstInputEl) return;
-
-  const values = [];
-  document.querySelectorAll("#tbl tbody tr").forEach(r => {
-    const input = r.cells?.[1]?.querySelector("input");
-    const rec = findProductRecord(input?.value || "");
-    if(rec && rec.gst > 0) values.push(rec.gst);
-  });
-  if(values.length === 0) return;
-
-  const unique = [...new Set(values)];
-  if(unique.length === 1){
-    gstInputEl.value = unique[0];
-    return;
-  }
-  if(!(Number(gstInputEl.value) > 0)){
-    gstInputEl.value = unique[0];
-  }
 }
 
 function normalizeFolioRecord(x){
@@ -388,10 +356,8 @@ function preparePrintTableValues(){
   document.querySelectorAll("#tbl tbody tr").forEach(r => {
     const productInput = r.cells?.[1]?.querySelector("input");
     const qtyInput = r.cells?.[2]?.querySelector("input");
-    const rateInput = r.cells?.[3]?.querySelector("input");
     const productPrint = r.cells?.[1]?.querySelector(".print-value");
     const qtyPrint = r.cells?.[2]?.querySelector(".print-value");
-    const ratePrint = r.cells?.[3]?.querySelector(".print-value");
 
     if(productPrint){
       productPrint.textContent = (productInput?.value || "").trim();
@@ -401,9 +367,6 @@ function preparePrintTableValues(){
       const unit = rec?.unit ? ` ${rec.unit}` : "";
       const qty = (qtyInput?.value || "").trim();
       qtyPrint.textContent = `${qty}${unit}`.trim();
-    }
-    if(ratePrint){
-      ratePrint.textContent = (rateInput?.value || "").trim();
     }
   });
 }
@@ -438,11 +401,11 @@ function triggerPrint(){
 //Backup & Import JSON
 //Export
 function exportData(){
-  const data = localStorage.getItem("gst_quotes_history");
+  const data = localStorage.getItem(STORE_KEY);
   const blob = new Blob([data], {type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "gst-backup.json";
+  a.download = "delivery-challan-backup.json";
   a.click();
 }
 
@@ -456,7 +419,7 @@ function importData(){
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onload = function(){
-      localStorage.setItem("gst_quotes_history", reader.result);
+      localStorage.setItem(STORE_KEY, reader.result);
       alert("Data Imported Successfully");
       location.reload();
     }
@@ -489,7 +452,7 @@ function checkUpdates(){
 }
 
 // Generate next quotation number
-function nextQuotationNumber(){
+function nextDeliveryChallanNumber(){
   return nextQnoFromList(getLocalHistory());
 }
 
@@ -508,10 +471,9 @@ async function saveQuotation(){
     applyProductSelection(productInput, r);
     let name=productInput.value;
     let qty=r.cells[2].querySelector("input").value;
-    let rate=r.cells[3].querySelector("input").value;
 
-    if(name && qty>0 && rate>0){
-      rows.push({name,qty,rate});
+    if(name && qty>0){
+      rows.push({name,qty});
     }
   });
 
@@ -525,9 +487,6 @@ async function saveQuotation(){
     client:document.getElementById("client").value,
     phone:document.getElementById("phone").value,
     folio: resolveCurrentFolio(),
-    pkg:+document.getElementById("pkg").value||0,
-    disc:+document.getElementById("disc").value||0,
-    gst:+document.getElementById("gst").value||0,
     items:rows,
     savedAt: Date.now()
   };
@@ -561,7 +520,7 @@ async function saveQuotation(){
   }
   document.getElementById("qno").value = newQno;
   holdCurrentQno = true;
-  alert(`Successfully saved (Quotation No: ${newQno})`);
+  alert(`Successfully saved (DC No: ${newQno})`);
 }
 
 document.getElementById("qno").addEventListener("change", () => {
@@ -588,9 +547,6 @@ function loadQuotation(){
   document.getElementById("phone").value = rec.phone;
   selectedFolio = normalizeFolioRecord(rec.folio) || findFolioByName(rec.client);
   document.getElementById("date").value = toISODateString(rec.date);
-  document.getElementById("pkg").value = rec.pkg;
-  document.getElementById("disc").value = rec.disc;
-  document.getElementById("gst").value = rec.gst;
 
   document.querySelector("#tbl tbody").innerHTML="";
 
@@ -600,7 +556,6 @@ function loadQuotation(){
     let r=document.querySelector("#tbl tbody tr:last-child");
     r.cells[1].querySelector("input").value=it.name;
     r.cells[2].querySelector("input").value=it.qty;
-    r.cells[3].querySelector("input").value=it.rate;
     applyProductSelection(r.cells[1].querySelector("input"), r);
   });
   if(items.length === 0){
@@ -625,12 +580,12 @@ function startCloudSync(){
 
       setLocalHistory(merged);
 
-      const cloudLastQno = Number(raw?.meta?.lastQno) || 0;
-      const mergedLastQno = nextQnoFromList(merged) - 1;
+      const cloudLastDcno = Number(raw?.meta?.lastDcno) || 0;
+      const mergedLastDcno = nextQnoFromList(merged) - 1;
       const shouldWriteBack =
         cloudHistory.length !== merged.length ||
         Array.isArray(raw) ||
-        cloudLastQno < mergedLastQno;
+        cloudLastDcno < mergedLastDcno;
 
       if(shouldWriteBack){
         await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
@@ -664,8 +619,6 @@ function addRow(){
     <span class="print-value"></span>
   </td>
   <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"><span class="print-value"></span></td>
-  <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"><span class="print-value"></span></td>
-  <td>0</td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">&times;</button></td>
   `;
   const productInput = row.cells[1].querySelector("input");
@@ -693,48 +646,36 @@ function ensureFirstRow(){
 
 // GST Buttons
 function setGST(val){
-  document.getElementById("gst").value = val;
+  const gst = document.getElementById("gst");
+  if(!gst) return;
+  gst.value = val;
   calc();
 }
 
 // Calculate totals
 function calc(){
-  let subtotal=0;
+  let totalQty=0;
 
   document.querySelectorAll("#tbl tbody tr").forEach((r,i)=>{
     r.cells[0].innerText=i+1;
 
-    let q=r.cells[2].children[0].value||0;
-    let rate=r.cells[3].children[0].value||0;
-
-    let amt=q*rate;
-    r.cells[4].innerText=amt.toFixed(2);
-
-    subtotal+=amt;
+    let q=Number(r.cells[2].children[0].value||0);
+    totalQty+=q;
   });
 
-  document.getElementById("subtotal").innerText=subtotal.toFixed(2);
-
-  let pkg=+pkgInput();
-  let disc=+discInput();
-  let gst=+gstInput();
-
-  let taxable=subtotal+pkg-disc;
-  let tax=taxable*(gst/100);
-
-  let half=tax/2;
-
-  document.getElementById("cgst").innerText=half.toFixed(2);
-  document.getElementById("sgst").innerText=half.toFixed(2);
-  document.getElementById("grand").innerText=(taxable+tax).toFixed(2);
+  const subtotalEl = document.getElementById("subtotal");
+  if(subtotalEl) subtotalEl.innerText=totalQty.toFixed(2);
+  const cgstEl = document.getElementById("cgst");
+  const sgstEl = document.getElementById("sgst");
+  const grandEl = document.getElementById("grand");
+  if(cgstEl) cgstEl.innerText="0.00";
+  if(sgstEl) sgstEl.innerText="0.00";
+  if(grandEl) grandEl.innerText=totalQty.toFixed(2);
 }
 
-function pkgInput(){return document.getElementById("pkg").value||0}
-function discInput(){return document.getElementById("disc").value||0}
-function gstInput(){return document.getElementById("gst").value||0}
-
 ["pkg","disc","gst"].forEach(id=>{
-  document.getElementById(id).oninput=calc;
+  const el = document.getElementById(id);
+  if(el) el.oninput=calc;
 });
 
 // Clear form
@@ -758,8 +699,6 @@ function handlePrint(){
   renderPrintPartyDetails();
   togglePrintField("client", ".clientDiv");
   togglePrintField("phone", ".phoneDiv");
-  togglePrintField("pkg", ".pkgDiv");
-  togglePrintField("disc", ".discDiv");
 }
 
 function restorePrint(){
@@ -769,7 +708,7 @@ function restorePrint(){
     box.style.display = "";
     box.innerHTML = "";
   }
-  document.querySelectorAll(".clientDiv, .phoneDiv, .pkgDiv, .discDiv")
+  document.querySelectorAll(".clientDiv, .phoneDiv")
     .forEach(div => div.style.display = "");
 }
 
@@ -784,10 +723,6 @@ function togglePrintField(inputId, divClass){
 
 // Share quotation via WhatsApp
 function shareWhatsApp(){
-  function indian(n){
-    return Number(n).toLocaleString('en-IN',{minimumFractionDigits:2});
-  }
-
   function formatDate(d){
     if(!d) return "";
     let parts=d.split("-");
@@ -798,43 +733,19 @@ function shareWhatsApp(){
   let dateVal = formatDate(document.getElementById("date").value);
 
   let msg = `Hi, M/s ${clientName},\n`;
-  msg += `Quote: -\n`;
+  msg += `Delivery Challan: -\n`;
   msg += `Date: ${dateVal}\n\n`;
-
-  let subtotal = 0;
 
   document.querySelectorAll("#tbl tbody tr").forEach(r=>{
 
     let name = r.cells[1].querySelector("input").value;
     let qty  = +r.cells[2].querySelector("input").value;
-    let rate = +r.cells[3].querySelector("input").value;
 
-    if(name && qty>0 && rate>0){
-
-      let amt = qty*rate;
-      subtotal += amt;
-
+    if(name && qty>0){
       msg += `${name}\n`;
-      msg += `     ${indian(rate)} x ${qty} = ${indian(amt)}\n\n`;
+      msg += `     Qty: ${qty}\n\n`;
     }
   });
-
-  let pkg  = +document.getElementById("pkg").value || 0;
-  let disc = +document.getElementById("disc").value || 0;
-  let gst  = +document.getElementById("gst").value || 0;
-
-  if(pkg>0)  msg += `(+) Packaging : ${indian(pkg)}\n`;
-  if(disc>0) msg += `(-) Discount : ${indian(disc)}\n`;
-
-  let taxable = subtotal + pkg - disc;
-  let tax = taxable * gst/100;
-  let half = tax/2;
-
-  msg += `Taxable Value = ${indian(taxable)}\n`;
-  msg += `(+) GST ${gst}% :\n`;
-  msg += `          CGST ${gst/2}% = ${indian(half)}\n`;
-  msg += `          SGST ${gst/2}% = ${indian(half)}\n\n`;
-  msg += `Grand Total = *${indian(taxable+tax)}*`;
 
   let phone = document.getElementById("phone").value.replace(/\D/g,'');
 
@@ -875,12 +786,8 @@ function renderLedger(list=null){
 
   data.forEach(r=>{
 
-    let subtotal=0;
-    safeItems(r).forEach(i=> subtotal += (Number(i.qty) || 0) * (Number(i.rate) || 0));
-
-    let taxable=subtotal + r.pkg - r.disc;
-    let tax=taxable*r.gst/100;
-    let grand=taxable+tax;
+    let totalQty=0;
+    safeItems(r).forEach(i=> totalQty += (Number(i.qty) || 0));
 
     let tr=document.createElement("tr");
 
@@ -888,7 +795,7 @@ function renderLedger(list=null){
       <td>${r.qno}</td>
       <td>${formatLedgerDate(r.date)}</td>
       <td>${r.client}</td>
-      <td>${grand.toLocaleString('en-IN')}</td>
+      <td>${totalQty.toLocaleString('en-IN')}</td>
       <td><button class="open-btn" onclick="openFromLedger(${r.qno})">Open</button></td>
     `;
 
@@ -996,4 +903,6 @@ document.addEventListener("keydown", e => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./service-worker.js');
 }
+
+
 

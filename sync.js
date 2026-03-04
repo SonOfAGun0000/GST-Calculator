@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-  import { getDatabase, ref, set, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
+  import { getDatabase, ref, set, onValue, runTransaction, get } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyA4NGdwbvS0JPR3jEpYXYIzlVFs9v3HEKQ",
@@ -22,5 +22,6 @@ window.ref = ref;
 window.set = set;
 window.onValue = onValue;
 window.runTransaction = runTransaction;
+window.get = get;
 window.dispatchEvent(new Event("firebase-ready"));
 

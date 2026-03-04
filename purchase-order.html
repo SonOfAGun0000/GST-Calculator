@@ -9,13 +9,13 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 
 
-<title>GST Quotation</title>
+<title>GST Purchase Order</title>
 
 <link rel="stylesheet" href="styles.css">
 
 </head>
 
-<body class="page-quote">
+<body class="page-po">
 <div class="app">
 <header>
   <div>
@@ -27,11 +27,11 @@
   </div>
   <img src="VSTD LOGO 3.0.png" alt="VSTD Logo" class="printLogo">
 </header>
-<p class="docType docType-quote">QUOTATION</p>
+<p class="docType docType-po">PURCHASE ORDER</p>
 
 <div class="row2">
   <div class="quoteno">
-    <label>Quotation No</label>
+    <label>PO No</label>
     <input id="qno" class="yellow">
     <span class="print-meta-value" data-source="qno"></span>
   </div>
@@ -45,7 +45,7 @@
 
 <div class="clientDiv">
   <div class="client">
-    <label>Client Name:</label>
+    <label>Supplier Name:</label>
     <input id="client" class="yellow">
   </div>
 </div>
@@ -58,6 +58,20 @@
   </div>
 </div>
 <div id="printPartyDetails" class="printPartyDetails"></div>
+<div class="poMeta">
+  <div class="poMetaDiv reqByDiv">
+    <label>Requisitioner</label>
+    <input id="reqBy" class="yellow" placeholder="Person / Dept">
+  </div>
+  <div class="poMetaDiv shipViaDiv">
+    <label>Ship Via</label>
+    <input id="shipVia" class="yellow" placeholder="Transport mode">
+  </div>
+  <div class="poMetaDiv shipTermsDiv">
+    <label>Shipping Terms</label>
+    <input id="shipTerms" class="yellow" placeholder="Terms">
+  </div>
+</div>
 
 <table id="tbl">
 <thead>
@@ -130,10 +144,10 @@
   </div>
 </div>
 <div class="printContact">
-  If you have any questions or doubts about this quotation please contact - <span class="printContactStrong">Kasi Anandan | +91 98946 99090</span>
+  If you have any questions or doubts about this purchase order please contact - <span class="printContactStrong">Kasi Anandan | +91 98946 99090</span>
 </div>
 
-<script src="app.js" defer></script>
+<script src="purchase-order.js" defer></script>
 
 <div id="ledgerModal" style="
 display:none;
@@ -152,11 +166,11 @@ height:90%;
 overflow:auto;
 ">
 
-<h3>Quotation History</h3>
+<h3>Purchase Order History</h3>
 <div id="ledgerPrintHeader" class="ledgerPrintHeader">
   <h1>VSTD COMPANY</h1>
   <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
-  <h2>Quotation History</h2>
+  <h2>Purchase Order History</h2>
 </div>
   <div id="ledgerPrintFilters" class="ledgerPrintFilters"></div>
 <div id="ledgerCount" style="font-size:12px;color:#555;margin-bottom:8px;"></div>
@@ -165,7 +179,7 @@ overflow:auto;
 Date:
 <input type="date" id="fDate">
 
-Customer:
+Supplier:
 <input id="fClient">
 
 Product:
@@ -181,7 +195,7 @@ Product:
 <tr>
 <th>S.No</th>
 <th>Date</th>
-<th>Client</th>
+<th>Supplier</th>
 <th>Total</th>
 <th>Open</th>
 </tr>
