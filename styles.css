@@ -289,6 +289,16 @@ input:focus {
   width:100%;
   max-width:none;
 }
+.date input[type="date"]{
+  min-height:44px;
+  padding-right:40px;
+}
+.date input[type="date"]::-webkit-date-and-time-value{
+  text-align:left;
+}
+.date input[type="date"]::-webkit-calendar-picker-indicator{
+  margin:0;
+}
 
 @media (min-width: 425px){
   .row2{
@@ -347,10 +357,10 @@ th,td{
 #tbl th:nth-child(4), #tbl td:nth-child(4) { width: 70px; }  /* Rate */
 #tbl th:nth-child(5), #tbl td:nth-child(5) { width: 80px; }  /* Amount */
 #tbl th:nth-child(6), #tbl td:nth-child(6) { width: 30px; }  /* X Button */
-.page-dc #tbl th:nth-child(1), .page-dc #tbl td:nth-child(1) { width: 34px; }
-.page-dc #tbl th:nth-child(2), .page-dc #tbl td:nth-child(2) { width: auto; }
-.page-dc #tbl th:nth-child(3), .page-dc #tbl td:nth-child(3) { width: 110px; }
-.page-dc #tbl th:nth-child(4), .page-dc #tbl td:nth-child(4) { width: 38px; }
+.page-po #tbl th:nth-child(1), .page-po #tbl td:nth-child(1) { width: 34px; }
+.page-po #tbl th:nth-child(2), .page-po #tbl td:nth-child(2) { width: auto; }
+.page-po #tbl th:nth-child(3), .page-po #tbl td:nth-child(3) { width: 110px; }
+.page-po #tbl th:nth-child(4), .page-po #tbl td:nth-child(4) { width: 38px; }
 
 .addProduct{
   width:100%;
@@ -556,6 +566,10 @@ input[type=number] {
   .buttons,.addProduct,.del-btn,#tbl th:nth-child(6), #tbl td:nth-child(6), .gstPresets {
     display:none;
   }
+  #tbl th:last-child,
+  #tbl td:last-child{
+    display:none !important;
+  }
   .print-value{
     display:inline !important;
   }
@@ -726,13 +740,10 @@ input[type=number] {
   #tbl th:nth-child(3), #tbl td:nth-child(3){ width:8%; }
   #tbl th:nth-child(4), #tbl td:nth-child(4){ width:12%; }
   #tbl th:nth-child(5), #tbl td:nth-child(5){ width:16%; }
-  .page-dc #tbl th:nth-child(4),
-  .page-dc #tbl td:nth-child(4){
-    display:none;
-  }
-  .page-dc #tbl th:nth-child(1), .page-dc #tbl td:nth-child(1){ width:8%; }
-  .page-dc #tbl th:nth-child(2), .page-dc #tbl td:nth-child(2){ width:66%; }
-  .page-dc #tbl th:nth-child(3), .page-dc #tbl td:nth-child(3){ width:26%; }
+  .page-po #tbl th:nth-child(1), .page-po #tbl td:nth-child(1){ width:8%; }
+  .page-po #tbl th:nth-child(2), .page-po #tbl td:nth-child(2){ width:68%; }
+  .page-po #tbl th:nth-child(3), .page-po #tbl td:nth-child(3){ width:20%; }
+  .page-po #tbl th:nth-child(4), .page-po #tbl td:nth-child(4){ width:4%; }
   .totals{
     width:44%;
     margin:10px 0 0 auto;
@@ -810,7 +821,7 @@ input[type=number] {
   .page-po .row2 .quoteno .print-meta-value{
     font-size:19px;
   }
-  .page-dc .totals{
+  .page-po .totals{
     width:auto;
     margin-top:12px;
   }

@@ -30,9 +30,6 @@ function normalizeHistory(list){
       qno: Number(r.qno),
       client: String(r.client || ""),
       date: toISODateString(r.date || "") || "",
-      pkg: Number(r.pkg) || 0,
-      disc: Number(r.disc) || 0,
-      gst: Number(r.gst) || 0,
       items: Array.isArray(r.items) ? r.items : []
     }))
     .sort((a,b) => a.qno - b.qno);
@@ -205,40 +202,12 @@ function applyProductSelection(input, row){
 
   input.value = rec.name;
   input.dataset.unit = rec.unit || "";
-  input.dataset.gst = String(rec.gst || "");
   input.dataset.code = rec.code || "";
-
-  if(row?.cells?.[3]){
-    const rateInput = row.cells[3].querySelector("input");
-    if(rateInput && !(Number(rateInput.value) > 0) && rec.rate > 0){
-      rateInput.value = rec.rate;
-    }
-  }
-
-  applyAutoGSTFromRows();
   return rec;
 }
 
 function applyAutoGSTFromRows(){
-  const gstInputEl = document.getElementById("gst");
-  if(!gstInputEl) return;
-
-  const values = [];
-  document.querySelectorAll("#tbl tbody tr").forEach(r => {
-    const input = r.cells?.[1]?.querySelector("input");
-    const rec = findProductRecord(input?.value || "");
-    if(rec && rec.gst > 0) values.push(rec.gst);
-  });
-  if(values.length === 0) return;
-
-  const unique = [...new Set(values)];
-  if(unique.length === 1){
-    gstInputEl.value = unique[0];
-    return;
-  }
-  if(!(Number(gstInputEl.value) > 0)){
-    gstInputEl.value = unique[0];
-  }
+  return;
 }
 
 function normalizeFolioRecord(x){
@@ -388,10 +357,8 @@ function preparePrintTableValues(){
   document.querySelectorAll("#tbl tbody tr").forEach(r => {
     const productInput = r.cells?.[1]?.querySelector("input");
     const qtyInput = r.cells?.[2]?.querySelector("input");
-    const rateInput = r.cells?.[3]?.querySelector("input");
     const productPrint = r.cells?.[1]?.querySelector(".print-value");
     const qtyPrint = r.cells?.[2]?.querySelector(".print-value");
-    const ratePrint = r.cells?.[3]?.querySelector(".print-value");
 
     if(productPrint){
       productPrint.textContent = (productInput?.value || "").trim();
@@ -401,9 +368,6 @@ function preparePrintTableValues(){
       const unit = rec?.unit ? ` ${rec.unit}` : "";
       const qty = (qtyInput?.value || "").trim();
       qtyPrint.textContent = `${qty}${unit}`.trim();
-    }
-    if(ratePrint){
-      ratePrint.textContent = (rateInput?.value || "").trim();
     }
   });
 }
@@ -508,10 +472,9 @@ async function saveQuotation(){
     applyProductSelection(productInput, r);
     let name=productInput.value;
     let qty=r.cells[2].querySelector("input").value;
-    let rate=r.cells[3].querySelector("input").value;
 
-    if(name && qty>0 && rate>0){
-      rows.push({name,qty,rate});
+    if(name && qty>0){
+      rows.push({name,qty});
     }
   });
 
@@ -528,9 +491,6 @@ async function saveQuotation(){
     reqBy:document.getElementById("reqBy").value,
     shipVia:document.getElementById("shipVia").value,
     shipTerms:document.getElementById("shipTerms").value,
-    pkg:+document.getElementById("pkg").value||0,
-    disc:+document.getElementById("disc").value||0,
-    gst:+document.getElementById("gst").value||0,
     items:rows,
     savedAt: Date.now()
   };
@@ -594,9 +554,6 @@ function loadQuotation(){
   document.getElementById("shipVia").value = rec.shipVia || "";
   document.getElementById("shipTerms").value = rec.shipTerms || "";
   document.getElementById("date").value = toISODateString(rec.date);
-  document.getElementById("pkg").value = rec.pkg;
-  document.getElementById("disc").value = rec.disc;
-  document.getElementById("gst").value = rec.gst;
 
   document.querySelector("#tbl tbody").innerHTML="";
 
@@ -606,7 +563,6 @@ function loadQuotation(){
     let r=document.querySelector("#tbl tbody tr:last-child");
     r.cells[1].querySelector("input").value=it.name;
     r.cells[2].querySelector("input").value=it.qty;
-    r.cells[3].querySelector("input").value=it.rate;
     applyProductSelection(r.cells[1].querySelector("input"), r);
   });
   if(items.length === 0){
@@ -670,8 +626,6 @@ function addRow(){
     <span class="print-value"></span>
   </td>
   <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"><span class="print-value"></span></td>
-  <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"><span class="print-value"></span></td>
-  <td>0</td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">&times;</button></td>
   `;
   const productInput = row.cells[1].querySelector("input");
@@ -697,51 +651,17 @@ function ensureFirstRow(){
   }
 }
 
-// GST Buttons
-function setGST(val){
-  document.getElementById("gst").value = val;
-  calc();
-}
-
 // Calculate totals
 function calc(){
-  let subtotal=0;
+  let totalQty=0;
 
   document.querySelectorAll("#tbl tbody tr").forEach((r,i)=>{
     r.cells[0].innerText=i+1;
-
-    let q=r.cells[2].children[0].value||0;
-    let rate=r.cells[3].children[0].value||0;
-
-    let amt=q*rate;
-    r.cells[4].innerText=amt.toFixed(2);
-
-    subtotal+=amt;
+    let q=Number(r.cells[2].children[0].value||0);
+    totalQty += q;
   });
-
-  document.getElementById("subtotal").innerText=subtotal.toFixed(2);
-
-  let pkg=+pkgInput();
-  let disc=+discInput();
-  let gst=+gstInput();
-
-  let taxable=subtotal+pkg-disc;
-  let tax=taxable*(gst/100);
-
-  let half=tax/2;
-
-  document.getElementById("cgst").innerText=half.toFixed(2);
-  document.getElementById("sgst").innerText=half.toFixed(2);
-  document.getElementById("grand").innerText=(taxable+tax).toFixed(2);
+  document.getElementById("grand").innerText=totalQty.toFixed(2);
 }
-
-function pkgInput(){return document.getElementById("pkg").value||0}
-function discInput(){return document.getElementById("disc").value||0}
-function gstInput(){return document.getElementById("gst").value||0}
-
-["pkg","disc","gst"].forEach(id=>{
-  document.getElementById(id).oninput=calc;
-});
 
 // Clear form
 function clearForm(){
@@ -767,8 +687,6 @@ function handlePrint(){
   togglePrintField("reqBy", ".reqByDiv");
   togglePrintField("shipVia", ".shipViaDiv");
   togglePrintField("shipTerms", ".shipTermsDiv");
-  togglePrintField("pkg", ".pkgDiv");
-  togglePrintField("disc", ".discDiv");
 }
 
 function restorePrint(){
@@ -778,7 +696,7 @@ function restorePrint(){
     box.style.display = "";
     box.innerHTML = "";
   }
-  document.querySelectorAll(".clientDiv, .phoneDiv, .reqByDiv, .shipViaDiv, .shipTermsDiv, .pkgDiv, .discDiv")
+  document.querySelectorAll(".clientDiv, .phoneDiv, .reqByDiv, .shipViaDiv, .shipTermsDiv")
     .forEach(div => div.style.display = "");
 }
 
@@ -793,10 +711,6 @@ function togglePrintField(inputId, divClass){
 
 // Share quotation via WhatsApp
 function shareWhatsApp(){
-  function indian(n){
-    return Number(n).toLocaleString('en-IN',{minimumFractionDigits:2});
-  }
-
   function formatDate(d){
     if(!d) return "";
     let parts=d.split("-");
@@ -816,41 +730,20 @@ function shareWhatsApp(){
   if(shipVia) msg += `Ship Via: ${shipVia}\n`;
   if(shipTerms) msg += `Shipping Terms: ${shipTerms}\n`;
   if(reqBy || shipVia || shipTerms) msg += `\n`;
-
-  let subtotal = 0;
+  let totalQty = 0;
 
   document.querySelectorAll("#tbl tbody tr").forEach(r=>{
 
     let name = r.cells[1].querySelector("input").value;
     let qty  = +r.cells[2].querySelector("input").value;
-    let rate = +r.cells[3].querySelector("input").value;
 
-    if(name && qty>0 && rate>0){
-
-      let amt = qty*rate;
-      subtotal += amt;
-
+    if(name && qty>0){
+      totalQty += qty;
       msg += `${name}\n`;
-      msg += `     ${indian(rate)} x ${qty} = ${indian(amt)}\n\n`;
+      msg += `     Qty: ${qty}\n\n`;
     }
   });
-
-  let pkg  = +document.getElementById("pkg").value || 0;
-  let disc = +document.getElementById("disc").value || 0;
-  let gst  = +document.getElementById("gst").value || 0;
-
-  if(pkg>0)  msg += `(+) Packaging : ${indian(pkg)}\n`;
-  if(disc>0) msg += `(-) Discount : ${indian(disc)}\n`;
-
-  let taxable = subtotal + pkg - disc;
-  let tax = taxable * gst/100;
-  let half = tax/2;
-
-  msg += `Taxable Value = ${indian(taxable)}\n`;
-  msg += `(+) GST ${gst}% :\n`;
-  msg += `          CGST ${gst/2}% = ${indian(half)}\n`;
-  msg += `          SGST ${gst/2}% = ${indian(half)}\n\n`;
-  msg += `Grand Total = *${indian(taxable+tax)}*`;
+  msg += `Total Qty = *${totalQty.toFixed(2)}*`;
 
   let phone = document.getElementById("phone").value.replace(/\D/g,'');
 
@@ -890,13 +783,8 @@ function renderLedger(list=null){
   tbody.innerHTML="";
 
   data.forEach(r=>{
-
-    let subtotal=0;
-    safeItems(r).forEach(i=> subtotal += (Number(i.qty) || 0) * (Number(i.rate) || 0));
-
-    let taxable=subtotal + r.pkg - r.disc;
-    let tax=taxable*r.gst/100;
-    let grand=taxable+tax;
+    let totalQty=0;
+    safeItems(r).forEach(i=> totalQty += (Number(i.qty) || 0));
 
     let tr=document.createElement("tr");
 
@@ -904,7 +792,7 @@ function renderLedger(list=null){
       <td>${r.qno}</td>
       <td>${formatLedgerDate(r.date)}</td>
       <td>${r.client}</td>
-      <td>${grand.toLocaleString('en-IN')}</td>
+      <td>${totalQty.toLocaleString('en-IN')}</td>
       <td><button class="open-btn" onclick="openFromLedger(${r.qno})">Open</button></td>
     `;
 

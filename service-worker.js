@@ -1,4 +1,4 @@
-const CACHE_NAME = "gst-quote-v4";
+const CACHE_NAME = "gst-quote-v5";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",
@@ -11,12 +11,12 @@ const FILES_TO_CACHE = [
   "./styles.css",
   "./app.js",
   "./purchase-order.js",
-  "./delivery-challan.js",
   "./product-master.js",
   "./folio-master.js",
   "./item-master.js",
   "./sync.js",
   "./manifest.json",
+  "./VSTD LOGO 3.0.png",
   "./icon-192.png",
   "./icon-512.png"
 ];
@@ -43,18 +43,29 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("fetch", event => {
   const { request } = event;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isCoreAsset = isSameOrigin && (
+    request.mode === "navigate" ||
+    /\.(html|js|css|json)$/i.test(url.pathname)
+  );
 
-  if (request.mode === "navigate") {
+  if (isCoreAsset) {
     event.respondWith(
-      fetch(request)
-        .then(response => {
+      (async () => {
+        try {
+          const response = await fetch(request);
           const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(request, copy);
           return response;
-        })
-        .catch(async () => {
+        } catch {
+          const cached = await caches.match(request);
+          if (cached) return cached;
           return (await caches.match(request)) || caches.match("./index.html");
-        })
+        }
+      })()
     );
     return;
   }
