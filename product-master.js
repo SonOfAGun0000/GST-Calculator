@@ -6,6 +6,9 @@ const CLOUD_ROOT = "companyData/catalogMaster";
 const CLOUD_CATALOG = `${CLOUD_ROOT}/catalog`;
 const LEGACY_CLOUD_PRODUCTS = "companyData/catalogLegacy/products";
 const LEGACY_CLOUD_ITEMS = "companyData/catalogLegacy/items";
+const LEGACY_CLOUD_ROOT = "companyData/catalogLegacy";
+const LEGACY_ITEM_MASTER_ROOT = "companyData/itemMaster";
+const LEGACY_CLOUD_CLEANUP_FLAG = "gst_catalog_legacy_cloud_cleanup_v1";
 
 let cloudSyncStarted = false;
 let editingId = null;
@@ -80,7 +83,7 @@ function normalizeLegacyItems(list){
 
 function getLocalCatalog(){
   try{
-    return normalizeCatalog(JSON.parse(localStorage.getItem(STORE_KEY) || "[]"));
+    return mergeCatalog(JSON.parse(localStorage.getItem(STORE_KEY) || "[]"));
   }catch{
     return [];
   }
@@ -109,16 +112,17 @@ function syncLegacyLocalViews(list){
 }
 
 function setLocalCatalog(list){
-  const normalized = normalizeCatalog(list);
+  const normalized = mergeCatalog(list);
   localStorage.setItem(STORE_KEY, JSON.stringify(normalized));
   syncLegacyLocalViews(normalized);
 }
 
 function catalogIdentity(rec){
-  const code = String(rec.code || "").trim().toLowerCase();
   const name = String(rec.name || "").trim().toLowerCase();
+  if(name) return `name:${name}`;
+  const code = String(rec.code || "").trim().toLowerCase();
   if(code) return `code:${code}`;
-  return `name:${name}`;
+  return "";
 }
 
 function mergeTwoCatalog(a, b){
@@ -155,7 +159,7 @@ function mergeCatalog(...lists){
   const all = lists.flat().filter(Boolean);
   normalizeCatalog(all).forEach(rec => {
     const key = catalogIdentity(rec);
-    if(!key || key === "name:") return;
+    if(!key) return;
     const existing = map.get(key);
     map.set(key, existing ? mergeTwoCatalog(existing, rec) : rec);
   });
@@ -285,34 +289,27 @@ function clearCatalogForm(){
 
 function syncRecordToCloud(rec){
   if(!window.database || !window.ref || !window.set) return;
-
   window.set(window.ref(window.database, `${CLOUD_CATALOG}/${rec.id}`), rec);
-
-  const productLegacy = {
-    id: rec.id,
-    name: rec.name,
-    unit: rec.unit,
-    hsn: rec.hsn,
-    gst: rec.gst,
-    updatedAt: rec.updatedAt
-  };
-  const itemLegacy = {
-    id: rec.id,
-    code: rec.code,
-    name: rec.name,
-    unit: rec.unit,
-    rate: rec.rate,
-    updatedAt: rec.updatedAt
-  };
-  window.set(window.ref(window.database, `${LEGACY_CLOUD_PRODUCTS}/${rec.id}`), productLegacy);
-  window.set(window.ref(window.database, `${LEGACY_CLOUD_ITEMS}/${rec.id}`), itemLegacy);
 }
 
 function syncDeleteFromCloud(id){
   if(!window.database || !window.ref || !window.set) return;
   window.set(window.ref(window.database, `${CLOUD_CATALOG}/${id}`), null);
-  window.set(window.ref(window.database, `${LEGACY_CLOUD_PRODUCTS}/${id}`), null);
-  window.set(window.ref(window.database, `${LEGACY_CLOUD_ITEMS}/${id}`), null);
+}
+
+function cleanupLegacyCloudData(){
+  try{
+    if(localStorage.getItem(LEGACY_CLOUD_CLEANUP_FLAG) === "1") return;
+    if(!window.database || !window.ref || !window.set) return;
+    Promise.all([
+      window.set(window.ref(window.database, LEGACY_CLOUD_ROOT), null),
+      window.set(window.ref(window.database, LEGACY_ITEM_MASTER_ROOT), null)
+    ])
+      .then(() => localStorage.setItem(LEGACY_CLOUD_CLEANUP_FLAG, "1"))
+      .catch(err => console.error("Legacy catalog cleanup failed:", err));
+  }catch(err){
+    console.error("Legacy cleanup check failed:", err);
+  }
 }
 
 function startCloudSync(){
@@ -353,6 +350,7 @@ function startCloudSync(){
       if(needWriteBack){
         await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
       }
+      cleanupLegacyCloudData();
     }catch(err){
       console.error("Catalog master sync failed:", err);
     }
