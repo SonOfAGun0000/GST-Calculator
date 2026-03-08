@@ -2,10 +2,10 @@ const STORE_KEY = "gst_catalog_master";
 const LEGACY_PRODUCT_KEY = "gst_product_master";
 const LEGACY_ITEM_KEY = "gst_item_master";
 
-const CLOUD_ROOT = "companyCatalogMaster";
+const CLOUD_ROOT = "companyData/catalogMaster";
 const CLOUD_CATALOG = `${CLOUD_ROOT}/catalog`;
-const LEGACY_CLOUD_PRODUCTS = "companyProductMaster/products";
-const LEGACY_CLOUD_ITEMS = "companyItemMaster/items";
+const LEGACY_CLOUD_PRODUCTS = "companyData/catalogLegacy/products";
+const LEGACY_CLOUD_ITEMS = "companyData/catalogLegacy/items";
 
 let cloudSyncStarted = false;
 let editingId = null;

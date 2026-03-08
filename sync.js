@@ -20,8 +20,10 @@ const LEGACY_PRODUCT_KEY = "gst_product_master";
 const LEGACY_ITEM_KEY = "gst_item_master";
 const FOLIO_LOCAL_KEY = "gst_folio_master";
 const REMOVED_DC_KEY = "gst_delivery_challans_history";
-const REMOVED_DC_CLOUD_ROOT = "companyDeliveryChallans";
+const REMOVED_DC_CLOUD_ROOT = "companyData/deliveryChallans";
 const REMOVED_DC_CLEANUP_FLAG = "gst_removed_dc_cleanup_v1";
+const CLOUD_CATALOG_ROOT = "companyData/catalogMaster";
+const CLOUD_FOLIO_ROOT = "companyData/folioMaster";
 
 function parseObjectValues(raw, key){
   if(Array.isArray(raw)) return raw;
@@ -114,7 +116,7 @@ function normalizeFolios(list){
 function startSharedMasterHydration(){
   if(!window.onValue || !window.ref || !window.database) return;
 
-  const catalogRef = window.ref(window.database, "companyCatalogMaster");
+  const catalogRef = window.ref(window.database, CLOUD_CATALOG_ROOT);
   window.onValue(catalogRef, snapshot => {
     try{
       const cloudCatalog = normalizeCatalogList(
@@ -135,7 +137,7 @@ function startSharedMasterHydration(){
     }
   });
 
-  const folioRef = window.ref(window.database, "companyFolioMaster");
+  const folioRef = window.ref(window.database, CLOUD_FOLIO_ROOT);
   window.onValue(folioRef, snapshot => {
     try{
       const cloudFolios = normalizeFolios(

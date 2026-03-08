@@ -1,5 +1,5 @@
 const STORE_KEY = "gst_item_master";
-const CLOUD_ROOT = "companyItemMaster";
+const CLOUD_ROOT = "companyData/itemMaster";
 const CLOUD_ITEMS = `${CLOUD_ROOT}/items`;
 let cloudSyncStarted = false;
 let editingId = null;

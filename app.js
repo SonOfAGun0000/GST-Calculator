@@ -104,6 +104,12 @@ function toCloudPayload(history){
   };
 }
 
+function toCloudQuotesPayload(history){
+  const quotes = {};
+  history.forEach(r => { quotes[r.qno] = r; });
+  return quotes;
+}
+
 // Auto date update
 function localISODate(){
   const d = new Date();
@@ -633,7 +639,10 @@ function startCloudSync(){
         cloudLastQno < mergedLastQno;
 
       if(shouldWriteBack){
-        await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
+        await Promise.all([
+          window.set(window.ref(window.database, CLOUD_QUOTES), toCloudQuotesPayload(merged)),
+          window.set(window.ref(window.database, CLOUD_LAST_QNO), mergedLastQno)
+        ]);
       }
 
       refreshNextQno();

@@ -1,5 +1,5 @@
 const STORE_KEY = "gst_folio_master";
-const CLOUD_ROOT = "companyFolioMaster";
+const CLOUD_ROOT = "companyData/folioMaster";
 const CLOUD_FOLIOS = `${CLOUD_ROOT}/folios`;
 
 let cloudSyncStarted = false;

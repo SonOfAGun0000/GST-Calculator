@@ -6,7 +6,7 @@ const products = (() => {
 })();
 const folioAllowedTypes = new Set(["supplier", "both"]);
 const STORE_KEY = "gst_purchase_orders_history";
-const CLOUD_ROOT = "companyPurchaseOrders";
+const CLOUD_ROOT = "companyData/purchaseOrders";
 const CLOUD_QUOTES = `${CLOUD_ROOT}/orders`;
 const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastPono`;
 let cloudSyncStarted = false;
@@ -73,22 +73,82 @@ function parseCloudHistory(raw){
   return [];
 }
 
+function poSignature(record){
+  return JSON.stringify({
+    date: toISODateString(record?.date || ""),
+    client: String(record?.client || "").trim(),
+    phone: String(record?.phone || "").trim(),
+    reqBy: String(record?.reqBy || "").trim(),
+    shipVia: String(record?.shipVia || "").trim(),
+    shipTerms: String(record?.shipTerms || "").trim(),
+    items: safeItems(record).map(i => ({
+      name: String(i?.name || "").trim(),
+      qty: Number(i?.qty) || 0
+    }))
+  });
+}
+
 function mergeHistory(localHistory, cloudHistory){
   const merged = new Map();
-  [...cloudHistory, ...localHistory].forEach(r => {
-    if(!r || !Number(r.qno)) return;
-    const qno = Number(r.qno);
+  const usedQnos = new Set();
+
+  function reserveQno(qno){
+    const n = Number(qno);
+    if(n > 0) usedQnos.add(n);
+  }
+
+  function nextAvailableQno(){
+    let n = 1;
+    while(usedQnos.has(n)) n += 1;
+    usedQnos.add(n);
+    return n;
+  }
+
+  cloudHistory.forEach(r => {
+    const qno = Number(r?.qno);
+    if(!qno) return;
+    reserveQno(qno);
+    merged.set(qno, { ...r, qno });
+  });
+
+  localHistory.forEach(r => {
+    const qno = Number(r?.qno);
+    if(!qno){
+      const assigned = nextAvailableQno();
+      merged.set(assigned, { ...r, qno: assigned });
+      return;
+    }
+
+    reserveQno(qno);
     const existing = merged.get(qno);
     if(!existing){
       merged.set(qno, { ...r, qno });
       return;
     }
+
+    const existingSig = poSignature(existing);
+    const incomingSig = poSignature(r);
     const existingSaved = Number(existing.savedAt) || 0;
-    const candidateSaved = Number(r.savedAt) || 0;
-    if(candidateSaved >= existingSaved){
-      merged.set(qno, { ...r, qno });
+    const incomingSaved = Number(r.savedAt) || 0;
+
+    if(existingSig === incomingSig){
+      if(incomingSaved >= existingSaved){
+        merged.set(qno, { ...r, qno });
+      }
+      return;
     }
+
+    if(incomingSaved >= existingSaved){
+      const movedQno = nextAvailableQno();
+      merged.set(movedQno, { ...existing, qno: movedQno });
+      merged.set(qno, { ...r, qno });
+      return;
+    }
+
+    const assigned = nextAvailableQno();
+    merged.set(assigned, { ...r, qno: assigned });
   });
+
   return [...merged.values()].sort((a,b) => a.qno - b.qno);
 }
 
