@@ -12,6 +12,12 @@ const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastPono`;
 let cloudSyncStarted = false;
 let holdCurrentQno = false;
 let selectedFolio = null;
+const AUTOCOMPLETE_LIMIT = 8;
+const autocompleteState = {
+  container: null,
+  list: null,
+  input: null
+};
 
 document.addEventListener("DOMContentLoaded", function(){
     setTodayDate();
@@ -232,32 +238,256 @@ function findProductRecord(token){
     || null;
 }
 
-function setupProductDatalist(){
-  let d = document.getElementById("plist");
-  if(!d){
-    d = document.createElement("datalist");
-    d.id = "plist";
-    document.body.appendChild(d);
-  }
-  d.innerHTML = "";
+function ensureAutocompleteUI(){
+  if(autocompleteState.container) return autocompleteState;
 
-  const values = new Set();
-  productCatalog.forEach(p => {
-    if(p.name) values.add(p.name);
-    if(p.code) values.add(p.code);
+  const container = document.createElement("div");
+  container.id = "customAutocomplete";
+  container.className = "customAutocomplete";
+  container.setAttribute("aria-hidden", "true");
+
+  const list = document.createElement("div");
+  list.className = "customAutocompleteList";
+  container.appendChild(list);
+
+  document.body.appendChild(container);
+
+  autocompleteState.container = container;
+  autocompleteState.list = list;
+
+  document.addEventListener("pointerdown", event => {
+    if(!autocompleteState.input || !container.classList.contains("open")) return;
+    if(container.contains(event.target) || autocompleteState.input.contains(event.target)) return;
+    closeAutocomplete();
   });
-  defaultProducts.forEach(p => values.add(p));
 
-  [...values].sort((a,b) => a.localeCompare(b)).forEach(v => {
-    const o = document.createElement("option");
-    o.value = v;
-    d.appendChild(o);
+  window.addEventListener("resize", positionAutocomplete);
+  window.addEventListener("scroll", positionAutocomplete, true);
+  return autocompleteState;
+}
+
+function closeAutocomplete(){
+  ensureAutocompleteUI();
+  autocompleteState.container.classList.remove("open");
+  autocompleteState.container.setAttribute("aria-hidden", "true");
+  autocompleteState.list.innerHTML = "";
+  autocompleteState.input = null;
+}
+
+function closeAutocompleteForInput(input){
+  if(autocompleteState.input === input){
+    closeAutocomplete();
+  }
+}
+
+function positionAutocomplete(){
+  ensureAutocompleteUI();
+  const input = autocompleteState.input;
+  if(!input || !document.body.contains(input)){
+    closeAutocomplete();
+    return;
+  }
+
+  const rect = input.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const maxWidth = Math.max(120, viewportWidth - 16);
+  const width = Math.min(Math.max(rect.width, 120), maxWidth);
+  const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
+  const spaceBelow = viewportHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const openAbove = spaceBelow < 120 && spaceAbove > spaceBelow;
+  const menuHeight = openAbove
+    ? Math.max(64, spaceAbove - 8)
+    : Math.max(64, spaceBelow);
+
+  autocompleteState.container.style.left = `${left}px`;
+  autocompleteState.container.style.width = `${width}px`;
+  autocompleteState.container.style.maxHeight = `${menuHeight}px`;
+
+  if(openAbove){
+    autocompleteState.container.style.top = "auto";
+    autocompleteState.container.style.bottom = `${Math.max(8, viewportHeight - rect.top + 4)}px`;
+  }else{
+    autocompleteState.container.style.bottom = "auto";
+    autocompleteState.container.style.top = `${Math.max(8, rect.bottom + 4)}px`;
+  }
+}
+
+function renderAutocompleteItems(input, items, onSelect){
+  ensureAutocompleteUI();
+
+  if(!Array.isArray(items) || items.length === 0){
+    closeAutocompleteForInput(input);
+    return;
+  }
+
+  autocompleteState.input = input;
+  autocompleteState.list.innerHTML = "";
+
+  items.slice(0, AUTOCOMPLETE_LIMIT).forEach(item => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "customAutocompleteItem";
+
+    const label = document.createElement("span");
+    label.className = "customAutocompleteMain";
+    label.textContent = item.label || "";
+    button.appendChild(label);
+
+    if(item.meta){
+      const meta = document.createElement("span");
+      meta.className = "customAutocompleteMeta";
+      meta.textContent = item.meta;
+      button.appendChild(meta);
+    }
+
+    button.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      onSelect(item);
+      closeAutocomplete();
+    });
+
+    autocompleteState.list.appendChild(button);
+  });
+
+  autocompleteState.container.classList.add("open");
+  autocompleteState.container.setAttribute("aria-hidden", "false");
+  positionAutocomplete();
+}
+
+function bindAutocomplete(input, getItems, onSelect){
+  input.removeAttribute("list");
+
+  const refresh = () => {
+    const token = normalizeKey(input.value);
+    if(!token){
+      closeAutocompleteForInput(input);
+      return;
+    }
+    renderAutocompleteItems(input, getItems(token), onSelect);
+  };
+
+  input.addEventListener("focus", refresh);
+  input.addEventListener("input", refresh);
+  input.addEventListener("keydown", event => {
+    if(event.key === "Escape"){
+      closeAutocompleteForInput(input);
+    }
+    if(event.key === "Enter"){
+      closeAutocompleteForInput(input);
+    }
+  });
+  input.addEventListener("blur", () => {
+    window.setTimeout(() => closeAutocompleteForInput(input), 120);
   });
 }
 
-function applyProductSelection(input, row){
+function rankTokenMatch(token, value){
+  const index = value.indexOf(token);
+  if(index < 0) return Number.POSITIVE_INFINITY;
+  return index === 0 ? 0 : index + 1;
+}
+
+function getProductSuggestions(token){
+  const suggestions = [];
+  const seen = new Set();
+
+  productCatalog.forEach(rec => {
+    const name = String(rec.name || "").trim();
+    const code = String(rec.code || "").trim();
+    const nameKey = normalizeKey(name);
+    const codeKey = normalizeKey(code);
+    const rank = Math.min(
+      rankTokenMatch(token, nameKey),
+      codeKey ? rankTokenMatch(token, codeKey) : Number.POSITIVE_INFINITY
+    );
+    if(!Number.isFinite(rank)) return;
+
+    const key = `${codeKey}|${nameKey}`;
+    if(seen.has(key)) return;
+    seen.add(key);
+
+    const meta = [];
+    if(code) meta.push(`Code: ${code}`);
+    if(rec.unit) meta.push(`Unit: ${rec.unit}`);
+    suggestions.push({
+      label: name || code,
+      meta: meta.join(" | "),
+      rank,
+      rec
+    });
+  });
+
+  defaultProducts.forEach(name => {
+    const nameKey = normalizeKey(name);
+    const rank = rankTokenMatch(token, nameKey);
+    if(!Number.isFinite(rank)) return;
+    const key = `|${nameKey}`;
+    if(seen.has(key)) return;
+    seen.add(key);
+    suggestions.push({
+      label: name,
+      meta: "",
+      rank,
+      rec: { code: "", name, unit: "", rate: 0, gst: 0 }
+    });
+  });
+
+  return suggestions.sort((a,b) => a.rank - b.rank || a.label.localeCompare(b.label));
+}
+
+function getFolioSuggestions(token){
+  const suggestions = [];
+  const seen = new Set();
+
+  loadPageFolios().forEach(folio => {
+    const name = String(folio.name || "").trim();
+    const nameKey = normalizeKey(name);
+    const rank = rankTokenMatch(token, nameKey);
+    if(!Number.isFinite(rank) || seen.has(nameKey)) return;
+    seen.add(nameKey);
+    suggestions.push({ label: name, meta: folio.type || "", rank, folio });
+  });
+
+  return suggestions.sort((a,b) => a.rank - b.rank || a.label.localeCompare(b.label));
+}
+
+function clearProductSelectionState(input){
+  if(!input) return;
+  input.dataset.unit = "";
+  input.dataset.code = "";
+}
+
+function attachProductAutocomplete(input, row){
+  if(!input || input.hasAttribute("data-product-autocomplete-bound")) return;
+  input.setAttribute("data-product-autocomplete-bound", "1");
+
+  bindAutocomplete(
+    input,
+    getProductSuggestions,
+    item => {
+      input.value = item.rec.name || item.label;
+      applyProductSelection(input, row, item.rec);
+      calc();
+    }
+  );
+
+  input.addEventListener("input", () => {
+    clearProductSelectionState(input);
+  });
+}
+
+function setupProductDatalist(){
+  ensureAutocompleteUI();
+  document.querySelectorAll("#tbl .product-field").forEach(input => {
+    attachProductAutocomplete(input, input.closest("tr"));
+  });
+}
+
+function applyProductSelection(input, row, matchedRecord = null){
   if(!input) return null;
-  const rec = findProductRecord(input.value);
+  const rec = matchedRecord || findProductRecord(input.value);
   if(!rec) return null;
 
   input.value = rec.name;
@@ -305,37 +535,26 @@ function findFolioByName(name){
 
 function setupFolioAutocomplete(){
   const clientInput = document.getElementById("client");
-  if(!clientInput) return;
+  if(!clientInput || clientInput.hasAttribute("data-folio-autocomplete-bound")) return;
+  clientInput.setAttribute("data-folio-autocomplete-bound", "1");
 
-  let d = document.getElementById("folioList");
-  if(!d){
-    d = document.createElement("datalist");
-    d.id = "folioList";
-    document.body.appendChild(d);
-  }
-  d.innerHTML = "";
-
-  const names = [...new Set(loadPageFolios().map(f => f.name))].sort((a,b) => a.localeCompare(b));
-  names.forEach(name => {
-    const o = document.createElement("option");
-    o.value = name;
-    d.appendChild(o);
-  });
-
-  clientInput.setAttribute("list", "folioList");
-  clientInput.addEventListener("input", () => {
-    if(findFolioByName(clientInput.value)){
-      applyFolioSelection();
+  bindAutocomplete(
+    clientInput,
+    getFolioSuggestions,
+    item => {
+      applyFolioSelection(item.folio);
     }
+  );
+
+  clientInput.addEventListener("input", () => {
+    selectedFolio = null;
   });
-  clientInput.addEventListener("change", applyFolioSelection);
-  clientInput.addEventListener("blur", applyFolioSelection);
 }
 
-function applyFolioSelection(){
+function applyFolioSelection(forcedFolio = null){
   const clientInput = document.getElementById("client");
   if(!clientInput) return;
-  const match = findFolioByName(clientInput.value);
+  const match = normalizeFolioRecord(forcedFolio) || findFolioByName(clientInput.value);
   selectedFolio = match;
   if(!match) return;
 
@@ -529,7 +748,6 @@ async function saveQuotation(){
   let rows=[];
   document.querySelectorAll("#tbl tbody tr").forEach(r=>{
     const productInput = r.cells[1].querySelector("input");
-    applyProductSelection(productInput, r);
     let name=productInput.value;
     let qty=r.cells[2].querySelector("input").value;
 
@@ -623,7 +841,6 @@ function loadQuotation(){
     let r=document.querySelector("#tbl tbody tr:last-child");
     r.cells[1].querySelector("input").value=it.name;
     r.cells[2].querySelector("input").value=it.qty;
-    applyProductSelection(r.cells[1].querySelector("input"), r);
   });
   if(items.length === 0){
     addRow();
@@ -682,27 +899,16 @@ function addRow(){
   row.innerHTML=`
   <td>${sno}</td>
   <td>
-    <input list="plist" class="yellow product-field" placeholder="Product name">
+    <input class="yellow product-field" placeholder="Product name">
     <span class="print-value"></span>
   </td>
   <td><input type="number" inputmode="decimal" step="any" value="" onchange="calc()" class="yellow"><span class="print-value"></span></td>
   <td><button class="del-btn" onclick="this.closest('tr').remove();calc()">&times;</button></td>
   `;
   const productInput = row.cells[1].querySelector("input");
-  productInput.addEventListener("change", () => {
-    applyProductSelection(productInput, row);
-    calc();
-  });
-  productInput.addEventListener("input", () => {
-    if(findProductRecord(productInput.value)){
-      applyProductSelection(productInput, row);
-      calc();
-    }
-  });
-  productInput.addEventListener("blur", () => {
-    applyProductSelection(productInput, row);
-    calc();
-  });
+  attachProductAutocomplete(productInput, row);
+  productInput.addEventListener("change", calc);
+  productInput.addEventListener("blur", calc);
 }
 function ensureFirstRow(){
   const tbody = document.querySelector("#tbl tbody");
