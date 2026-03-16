@@ -217,6 +217,17 @@ header p{
   color:#475569;
   margin:2px 0 8px;
 }
+.tableScroll{
+  width:100%;
+  max-width:100%;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+}
+.tableScroll > table{
+  width:max-content;
+  min-width:100%;
+}
 .masterTable{
   width:100%;
   border-collapse:collapse;
@@ -489,7 +500,6 @@ th,td{
   border-radius:8px;
   box-shadow:0 12px 28px rgba(15, 23, 42, .18);
   overflow:hidden;
-  min-width:300px;
   max-height:40vh;
 }
 .customAutocomplete.open{

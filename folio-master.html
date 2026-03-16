@@ -59,20 +59,22 @@
       <button onclick="importData()">Import</button>
     </div>
     <div id="foCount" class="masterCount"></div>
-    <table id="foTable" class="masterTable">
-      <thead>
-        <tr>
-          <th>S.No</th>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Phone</th>
-          <th>GSTIN</th>
-          <th>Edit</th>
-          <th>Del</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <div class="tableScroll">
+      <table id="foTable" class="masterTable">
+        <thead>
+          <tr>
+            <th>S.No</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Phone</th>
+            <th>GSTIN</th>
+            <th>Edit</th>
+            <th>Del</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>

@@ -148,7 +148,8 @@ margin:20px;
 padding:15px;
 border-radius:10px;
 height:90%;
-overflow:auto;
+overflow-y:auto;
+overflow-x:hidden;
 ">
 
 <h3>Quotation History</h3>
@@ -175,6 +176,7 @@ Product:
 <button onclick="exportLedgerPDF()">PDF</button>
 <button onclick="closeLedger()">Close</button>
 </div>
+<div class="tableScroll">
 <table id="ledgerTable" style="margin-top:10px;width:100%;border-collapse:collapse">
 <thead>
 <tr>
@@ -187,6 +189,7 @@ Product:
 </thead>
 <tbody></tbody>
 </table>
+</div>
 
 </div>
 </div>

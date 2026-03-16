@@ -55,22 +55,24 @@
       <button onclick="importData()">Import</button>
     </div>
     <div id="pmCount" class="masterCount"></div>
-    <table id="pmTable" class="masterTable">
-      <thead>
-        <tr>
-          <th>S.No</th>
-          <th>Code</th>
-          <th>Product</th>
-          <th>Unit</th>
-          <th>Rate</th>
-          <th>HSN</th>
-          <th>GST %</th>
-          <th>Edit</th>
-          <th>Del</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <div class="tableScroll">
+      <table id="pmTable" class="masterTable">
+        <thead>
+          <tr>
+            <th>S.No</th>
+            <th>Code</th>
+            <th>Product</th>
+            <th>Unit</th>
+            <th>Rate</th>
+            <th>HSN</th>
+            <th>GST %</th>
+            <th>Edit</th>
+            <th>Del</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>
