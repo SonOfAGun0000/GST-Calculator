@@ -1,4 +1,4 @@
-const CACHE_NAME = "gst-quote-v8";
+const CACHE_NAME = "gst-quote-v9";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",

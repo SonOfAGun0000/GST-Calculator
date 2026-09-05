@@ -513,6 +513,33 @@ th,td{
   padding:4px 8px;
   border-radius:6px;
 }
+.ledger-action-group{
+  display:grid;
+  gap:6px;
+  padding:4px;
+}
+.ledger-action-btn{
+  min-width:64px;
+  min-height:44px;
+  padding:7px 9px;
+  border-radius:6px;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+}
+.history-delete-btn{
+  border:1px solid #b91c1c;
+  background:#fff5f5;
+  color:#b91c1c;
+}
+.history-delete-btn:active{
+  background:#fee2e2;
+}
+@media (min-width: 768px){
+  .ledger-action-group{
+    grid-template-columns:repeat(2, auto);
+  }
+}
 #tbl input {
   margin: 0;
   width: 100%;

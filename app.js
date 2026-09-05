@@ -6,6 +6,7 @@ const products = (() => {
 })();
 const folioAllowedTypes = new Set(["customer", "both"]);
 const STORE_KEY = "gst_quotes_history";
+const LOCAL_LAST_QNO_KEY = "gst_last_qno";
 const CLOUD_ROOT = "companyData";
 const CLOUD_QUOTES = `${CLOUD_ROOT}/quotes`;
 const CLOUD_LAST_QNO = `${CLOUD_ROOT}/meta/lastQno`;
@@ -59,12 +60,38 @@ function getLocalHistory(){
 }
 
 function setLocalHistory(data){
-  localStorage.setItem(STORE_KEY, JSON.stringify(normalizeHistory(data)));
+  const normalized = normalizeHistory(data);
+  localStorage.setItem(STORE_KEY, JSON.stringify(normalized));
+  updateLocalHighWater(maxQnoFromList(normalized));
+}
+
+function maxQnoFromList(data){
+  return data.reduce((m, r) => Math.max(m, Number(r.qno) || 0), 0);
+}
+
+function getLocalHighWater(){
+  const stored = Number(localStorage.getItem(LOCAL_LAST_QNO_KEY));
+  return Number.isSafeInteger(stored) && stored > 0 ? stored : 0;
+}
+
+function updateLocalHighWater(...values){
+  const current = getLocalHighWater();
+  const next = values.reduce((max, value) => {
+    const n = Number(value);
+    return Number.isSafeInteger(n) && n > max ? n : max;
+  }, current);
+  if(next > current){
+    localStorage.setItem(LOCAL_LAST_QNO_KEY, String(next));
+  }
+  return next;
+}
+
+function currentHighWater(data = getLocalHistory(), cloudLastQno = 0){
+  return updateLocalHighWater(maxQnoFromList(data), cloudLastQno);
 }
 
 function nextQnoFromList(data){
-  const max = data.reduce((m, r) => Math.max(m, Number(r.qno) || 0), 0);
-  return max + 1;
+  return Math.max(maxQnoFromList(data), getLocalHighWater()) + 1;
 }
 
 function refreshNextQno(force = false){
@@ -106,7 +133,7 @@ function toCloudPayload(history){
   history.forEach(r => { quotes[r.qno] = r; });
   return {
     quotes,
-    meta: { lastQno: nextQnoFromList(history) - 1 }
+    meta: { lastQno: currentHighWater(history) }
   };
 }
 
@@ -637,6 +664,7 @@ function preparePrintTableValues(){
 //Generate Quote No.
 function generateNextQuoteNo(){
   let history = getLocalHistory();
+  currentHighWater(history);
   let next = nextQnoFromList(history);
   holdCurrentQno = false;
   document.getElementById("qno").value = next;
@@ -696,9 +724,17 @@ function importData(){
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onload = function(){
-      localStorage.setItem("gst_quotes_history", reader.result);
-      alert("Data Imported Successfully");
-      location.reload();
+      try{
+        const imported = JSON.parse(reader.result);
+        if(!Array.isArray(imported)) throw new Error("Quotation backup must contain a list");
+        localStorage.setItem(STORE_KEY, reader.result);
+        updateLocalHighWater(maxQnoFromList(normalizeHistory(imported)));
+        alert("Data Imported Successfully");
+        location.reload();
+      }catch(err){
+        console.error("Quotation import failed:", err);
+        alert("Import failed. Please choose a valid quotation backup file.");
+      }
     }
     reader.readAsText(file);
   };
@@ -778,7 +814,7 @@ async function saveQuotation(){
     try{
       const tx = await window.runTransaction(
         window.ref(window.database, CLOUD_LAST_QNO),
-        current => (Number(current) || 0) + 1
+        current => Math.max(Number(current) || 0, currentHighWater(data)) + 1
       );
       if(!tx.committed){
         throw new Error("Failed to allocate quotation number");
@@ -864,7 +900,7 @@ function startCloudSync(){
       setLocalHistory(merged);
 
       const cloudLastQno = Number(raw?.meta?.lastQno) || 0;
-      const mergedLastQno = nextQnoFromList(merged) - 1;
+      const mergedLastQno = currentHighWater(merged, cloudLastQno);
       const shouldWriteBack =
         cloudHistory.length !== merged.length ||
         Array.isArray(raw) ||
@@ -1119,31 +1155,90 @@ function renderLedger(list=null){
       <td>${formatLedgerDate(r.date)}</td>
       <td>${r.client}</td>
       <td>${grand.toLocaleString('en-IN')}</td>
-      <td><button class="open-btn" onclick="openFromLedger(${r.qno})">Open</button></td>
+      <td>
+        <div class="ledger-action-group">
+          <button class="open-btn ledger-action-btn" onclick="openFromLedger(${r.qno})">Open</button>
+          <button class="history-delete-btn ledger-action-btn" onclick="deleteLedgerEntry(${r.qno})">Delete</button>
+        </div>
+      </td>
     `;
 
     tbody.appendChild(tr);
   });
 }
 
-// Delete Saved Ledger
-function deleteLedgerEntry(qno){
+// Delete one saved quotation without changing its issued-number high-water mark.
+async function deleteLedgerEntry(qno){
+  const target = Number(qno);
+  if(!Number.isSafeInteger(target) || target <= 0){
+    console.error("Quotation deletion aborted: invalid number", qno);
+    alert("Could not delete this quotation because its number is invalid.");
+    return;
+  }
 
-  if(!confirm("Delete this entry?")) return;
+  const data = getHistory();
+  const matches = data.filter(r => Number(r.qno) === target);
+  if(matches.length !== 1){
+    console.error("Quotation deletion aborted: expected one match", { target, matches: matches.length });
+    alert("Could not safely delete this quotation. No records were changed.");
+    return;
+  }
 
-  let data = getHistory();
-  data = data.filter(r => r.qno !== qno);
+  const confirmed = confirm(
+    `Delete Quotation #${target}?\n\nThis will remove this saved quotation.\nThis action cannot be undone.`
+  );
+  if(!confirmed) return;
 
-  setLocalHistory(data);
-  syncDeletedEntryToCloud(qno);
+  const remaining = data.filter(r => Number(r.qno) !== target);
+  if(data.length - remaining.length !== 1){
+    console.error("Quotation deletion aborted: unexpected removal count", { target });
+    alert("Could not safely delete this quotation. No records were changed.");
+    return;
+  }
 
-  renderLedger();
-  refreshNextQno();
+  const deletingCurrent = Number(document.getElementById("qno")?.value) === target;
+  currentHighWater(data);
+  setLocalHistory(remaining);
+  filterLedger();
+  const cloudResult = await syncDeletedEntryToCloud(target);
+
+  if(cloudResult !== true){
+    alert("Quotation deleted locally. Cloud deletion could not be confirmed and the record may reappear after synchronization.");
+  }
+  if(deletingCurrent){
+    alert("The deleted quotation was open. The form will now reset to a new quotation.");
+    location.reload();
+  }
 }
 
-function syncDeletedEntryToCloud(qno){
-  if(!window.database || !window.ref || !window.set) return;
-  window.set(window.ref(window.database, `${CLOUD_QUOTES}/${qno}`), null);
+async function syncDeletedEntryToCloud(qno){
+  if(!window.database || !window.ref || !window.set){
+    console.warn("Quotation deleted locally; Firebase is unavailable.");
+    return false;
+  }
+  try{
+    const cloudWrite = window.set(window.ref(window.database, `${CLOUD_QUOTES}/${qno}`), null);
+    if(navigator.onLine === false){
+      cloudWrite.catch(err => console.error("Queued quotation cloud deletion failed:", err));
+      console.warn("Quotation cloud deletion queued while offline for this app session.");
+      return false;
+    }
+    const timeout = new Promise(resolve => window.setTimeout(() => resolve(false), 3000));
+    const completed = cloudWrite
+      .then(() => true)
+      .catch(err => {
+        console.error("Quotation cloud deletion failed:", err);
+        return false;
+      });
+    if(await Promise.race([completed, timeout]) !== true){
+      console.warn("Quotation cloud deletion is still pending.");
+      return false;
+    }
+    return true;
+  }catch(err){
+    console.error("Quotation cloud deletion failed:", err);
+    return false;
+  }
 }
 
 function updateLedgerPrintFilters(){
