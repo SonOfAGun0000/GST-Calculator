@@ -19,9 +19,6 @@ const CATALOG_LOCAL_KEY = "gst_catalog_master";
 const LEGACY_PRODUCT_KEY = "gst_product_master";
 const LEGACY_ITEM_KEY = "gst_item_master";
 const FOLIO_LOCAL_KEY = "gst_folio_master";
-const REMOVED_DC_KEY = "gst_delivery_challans_history";
-const REMOVED_DC_CLOUD_ROOT = "companyData/deliveryChallans";
-const REMOVED_DC_CLEANUP_FLAG = "gst_removed_dc_cleanup_v1";
 const CLOUD_CATALOG_ROOT = "companyData/catalogMaster";
 const CLOUD_FOLIO_ROOT = "companyData/folioMaster";
 
@@ -162,23 +159,6 @@ function startSharedMasterHydration(){
   });
 }
 
-function cleanupRemovedDeliveryChallanData(){
-  try{
-    localStorage.removeItem(REMOVED_DC_KEY);
-  }catch{}
-
-  try{
-    if(localStorage.getItem(REMOVED_DC_CLEANUP_FLAG) === "1") return;
-    if(!window.set || !window.ref || !window.database) return;
-    window
-      .set(window.ref(window.database, REMOVED_DC_CLOUD_ROOT), null)
-      .then(() => localStorage.setItem(REMOVED_DC_CLEANUP_FLAG, "1"))
-      .catch(err => console.error("Delivery challan cloud cleanup failed:", err));
-  }catch(err){
-    console.error("Delivery challan cleanup failed:", err);
-  }
-}
-
 // expose globally
 window.database = database;
 window.ref = ref;
@@ -187,6 +167,5 @@ window.onValue = onValue;
 window.runTransaction = runTransaction;
 window.get = get;
 startSharedMasterHydration();
-cleanupRemovedDeliveryChallanData();
 window.dispatchEvent(new Event("firebase-ready"));
 

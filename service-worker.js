@@ -1,4 +1,4 @@
-const CACHE_NAME = "gst-quote-v9";
+const CACHE_NAME = "gst-quote-v10";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",
@@ -12,6 +12,7 @@ const FILES_TO_CACHE = [
   "./styles.css",
   "./app.js",
   "./purchase-order.js",
+  "./persistence-v2.js",
   "./product-master.js",
   "./folio-master.js",
   "./item-master.js",

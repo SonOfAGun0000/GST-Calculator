@@ -6,9 +6,6 @@ const CLOUD_ROOT = "companyData/catalogMaster";
 const CLOUD_CATALOG = `${CLOUD_ROOT}/catalog`;
 const LEGACY_CLOUD_PRODUCTS = "companyData/catalogLegacy/products";
 const LEGACY_CLOUD_ITEMS = "companyData/catalogLegacy/items";
-const LEGACY_CLOUD_ROOT = "companyData/catalogLegacy";
-const LEGACY_ITEM_MASTER_ROOT = "companyData/itemMaster";
-const LEGACY_CLOUD_CLEANUP_FLAG = "gst_catalog_legacy_cloud_cleanup_v1";
 
 let cloudSyncStarted = false;
 let editingId = null;
@@ -297,21 +294,6 @@ function syncDeleteFromCloud(id){
   window.set(window.ref(window.database, `${CLOUD_CATALOG}/${id}`), null);
 }
 
-function cleanupLegacyCloudData(){
-  try{
-    if(localStorage.getItem(LEGACY_CLOUD_CLEANUP_FLAG) === "1") return;
-    if(!window.database || !window.ref || !window.set) return;
-    Promise.all([
-      window.set(window.ref(window.database, LEGACY_CLOUD_ROOT), null),
-      window.set(window.ref(window.database, LEGACY_ITEM_MASTER_ROOT), null)
-    ])
-      .then(() => localStorage.setItem(LEGACY_CLOUD_CLEANUP_FLAG, "1"))
-      .catch(err => console.error("Legacy catalog cleanup failed:", err));
-  }catch(err){
-    console.error("Legacy cleanup check failed:", err);
-  }
-}
-
 function startCloudSync(){
   if(cloudSyncStarted) return true;
   if(!window.database || !window.ref || !window.onValue || !window.set) return false;
@@ -350,7 +332,6 @@ function startCloudSync(){
       if(needWriteBack){
         await window.set(window.ref(window.database, CLOUD_ROOT), toCloudPayload(merged));
       }
-      cleanupLegacyCloudData();
     }catch(err){
       console.error("Catalog master sync failed:", err);
     }
