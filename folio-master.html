@@ -17,7 +17,7 @@
       <h1>VSTD COMPANY</h1>
       <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
     </div>
-    <div class="hamburger" onclick="toggleMenu()">&#9776;</div>
+    <button type="button" id="menuToggle" class="hamburger" onclick="toggleMenu()" aria-label="Open menu" aria-controls="sideMenu" aria-expanded="false">&#9776;</button>
   </header>
   <p class="docType docType-folio">FOLIO MASTER</p>
 
@@ -78,19 +78,22 @@
   </div>
 
   <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>
-  <div id="sideMenu" class="sideMenu">
+  <nav id="sideMenu" class="sideMenu" aria-label="App menu" aria-hidden="true">
     <div class="menuHeader">
       <span>Menu</span>
-      <button onclick="closeMenu()">&times;</button>
+      <button type="button" id="menuClose" onclick="closeMenu()" aria-label="Close menu">&times;</button>
     </div>
-    <button onclick="location.href='index.html'">Quotation Entry</button>
-    <button onclick="location.href='purchase-order.html'">Purchase Order</button>
-    <button onclick="location.href='product-master.html'">Product Master</button>
-    <button onclick="location.href='folio-master.html'">Folio Master</button>
+    <div class="menuGroupLabel">Navigation</div>
+    <button type="button" onclick="location.href='index.html'">Purchase Order</button>
+    <button type="button" onclick="location.href='quotation.html'">Quotation</button>
+    <div class="menuGroupLabel">Masters</div>
+    <button type="button" onclick="location.href='product-master.html'">Product Master</button>
+    <button type="button" class="currentPage" aria-current="page" onclick="location.href='folio-master.html'">Folio Master</button>
     <hr class="menuSeparator">
-    <button onclick="shareApp()">Share App</button>
-    <button onclick="checkUpdates()">Check for Updates</button>
-  </div>
+    <div class="menuGroupLabel">App</div>
+    <button type="button" onclick="shareApp()">Share App</button>
+    <button type="button" onclick="checkUpdates()">Check for Updates</button>
+  </nav>
 </div>
 <div class="printContact">
   If you have any questions or doubts about this folio master please contact - Kasi Anandan | +91 98946 99090

@@ -220,13 +220,26 @@ function importData(){
 }
 
 function toggleMenu(){
-  document.getElementById("sideMenu").classList.add("open");
+  const menu = document.getElementById("sideMenu");
+  const trigger = document.getElementById("menuToggle");
+  menu.classList.add("open");
+  menu.setAttribute("aria-hidden", "false");
   document.getElementById("menuOverlay").classList.add("active");
+  document.body.classList.add("menu-open");
+  trigger?.setAttribute("aria-expanded", "true");
+  window.setTimeout(() => document.getElementById("menuClose")?.focus(), 0);
 }
 
 function closeMenu(){
-  document.getElementById("sideMenu").classList.remove("open");
+  const menu = document.getElementById("sideMenu");
+  const wasOpen = menu.classList.contains("open");
+  menu.classList.remove("open");
+  menu.setAttribute("aria-hidden", "true");
   document.getElementById("menuOverlay").classList.remove("active");
+  document.body.classList.remove("menu-open");
+  const trigger = document.getElementById("menuToggle");
+  trigger?.setAttribute("aria-expanded", "false");
+  if(wasOpen) trigger?.focus();
 }
 
 function shareApp(){
@@ -252,6 +265,13 @@ function escapeHtml(value){
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
 }
+
+document.addEventListener("keydown", event => {
+  if(event.key === "Escape" && document.getElementById("sideMenu")?.classList.contains("open")){
+    event.preventDefault();
+    closeMenu();
+  }
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./service-worker.js");

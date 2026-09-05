@@ -9,29 +9,27 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 
 
-<title>GST Quotation</title>
+<title>GST Purchase Order</title>
 
 <link rel="stylesheet" href="styles.css">
 
 </head>
 
-<body class="page-quote">
+<body class="page-po">
 <div class="app">
 <header>
   <div>
     <h1>VSTD COMPANY</h1>
     <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
   </div>
-  <div class="hamburger" onclick="toggleMenu()">
-    &#9776;
-  </div>
+  <button type="button" id="menuToggle" class="hamburger" onclick="toggleMenu()" aria-label="Open menu" aria-controls="sideMenu" aria-expanded="false">&#9776;</button>
   <img src="VSTD LOGO 3.0.png" alt="VSTD Logo" class="printLogo">
 </header>
-<p class="docType docType-quote">QUOTATION</p>
+<p class="docType docType-po">PURCHASE ORDER</p>
 
 <div class="row2">
   <div class="quoteno">
-    <label>Quotation No</label>
+    <label>PO No</label>
     <input id="qno" class="yellow">
     <span class="print-meta-value" data-source="qno"></span>
   </div>
@@ -45,7 +43,7 @@
 
 <div class="clientDiv">
   <div class="client">
-    <label>Client Name:</label>
+    <label>Supplier Name:</label>
     <input id="client" class="yellow">
   </div>
 </div>
@@ -58,11 +56,25 @@
   </div>
 </div>
 <div id="printPartyDetails" class="printPartyDetails"></div>
+<div class="poMeta">
+  <div class="poMetaDiv reqByDiv">
+    <label>Order placed by</label>
+    <input id="reqBy" class="yellow" placeholder="Person / Dept">
+  </div>
+  <div class="poMetaDiv shipViaDiv">
+    <label>Vehicle No.</label>
+    <input id="shipVia" class="yellow" placeholder="TN-38-A-0000">
+  </div>
+  <div class="poMetaDiv shipTermsDiv">
+    <label>Shipping Terms</label>
+    <input id="shipTerms" class="yellow" placeholder="Terms">
+  </div>
+</div>
 
 <table id="tbl">
 <thead>
 <tr>
-<th>S.No</th><th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th>
+<th>S.No</th><th>Product</th><th>Qty</th>
 <th></th>
 </tr>
 </thead>
@@ -72,36 +84,7 @@
 <button class="addProduct" onclick="addRow()">+ Add Product</button>
 
 <div class="totals">
-
-  <div>Taxable Value <span id="subtotal">0.00</span></div>
-
-  <div class="pkgDiv">
-    <div>
-      Pkg/Fwd
-      <input id="pkg" type="number" inputmode="decimal" step="any" class="yellow small" value="">
-    </div>
-  </div>
-  <div class="discDiv">
-    <div>
-      Discount
-      <input id="disc" type="number" inputmode="decimal" step="any" class="yellow small" value="">
-    </div>
-  </div>
-  <div class="gst-row">
-    <div class="gstPresets">
-      <button type="button" onclick="setGST(5)">5%</button>
-      <button type="button" onclick="setGST(18)">18%</button>
-      <button type="button" onclick="setGST(28)">28%</button>
-    </div>
-    GST %
-    <input id="gst" type="number" inputmode="decimal" step="any" class="yellow small" value="">
-  </div>
-
-  <div>CGST <span id="cgst">0.00</span></div>
-  <div>SGST <span id="sgst">0.00</span></div>
-
-  <h2>Grand Total &#8377; <span id="grand" style="color: #db273f;">0.00</span></h2>
-
+  <h2>Total Qty <span id="grand" style="color: #db273f;">0.00</span></h2>
 </div>
 
 <div class="buttons">
@@ -112,27 +95,30 @@
   <button onclick="openLedger()"><span class="fluent-color--history-20"></span></button>
 </div>
 <div id="menuOverlay" class="menuOverlay" onclick="closeMenu()"></div>
-  <div id="sideMenu" class="sideMenu">
-    <div class="menuHeader">
-      <span>Menu</span>
-      <button onclick="closeMenu()">&times;</button>
-    </div>
-    <button onclick="location.href='index.html'">Quotation Entry</button>
-    <button onclick="location.href='purchase-order.html'">Purchase Order</button>
-    <button onclick="location.href='product-master.html'">Product Master</button>
-    <button onclick="location.href='folio-master.html'">Folio Master</button>
-    <hr class="menuSeparator">
-    <button onclick="exportData()">Backup Data</button>
-    <button onclick="importData()">Import Data</button>
-    <button onclick="shareApp()">Share App</button>
-    <button onclick="checkUpdates()">Check for Updates</button>
+<nav id="sideMenu" class="sideMenu" aria-label="App menu" aria-hidden="true">
+  <div class="menuHeader">
+    <span>Menu</span>
+    <button type="button" id="menuClose" onclick="closeMenu()" aria-label="Close menu">&times;</button>
   </div>
+  <div class="menuGroupLabel">Navigation</div>
+  <button type="button" class="currentPage" aria-current="page" onclick="location.href='index.html'">Purchase Order</button>
+  <button type="button" onclick="location.href='quotation.html'">Quotation</button>
+  <div class="menuGroupLabel">Masters</div>
+  <button type="button" onclick="location.href='product-master.html'">Product Master</button>
+  <button type="button" onclick="location.href='folio-master.html'">Folio Master</button>
+  <hr class="menuSeparator">
+  <div class="menuGroupLabel">Purchase Order Data / App</div>
+  <button type="button" onclick="exportData()">Backup Purchase Orders</button>
+  <button type="button" onclick="importData()">Import Purchase Orders</button>
+  <button type="button" onclick="shareApp()">Share App</button>
+  <button type="button" onclick="checkUpdates()">Check for Updates</button>
+</nav>
 </div>
 <div class="printContact">
-  If you have any questions or doubts about this quotation please contact - <span class="printContactStrong">Kasi Anandan | +91 98946 99090</span>
+  If you have any questions or doubts about this purchase order please contact - <span class="printContactStrong">Kasi Anandan | +91 98946 99090</span>
 </div>
 
-<script src="app.js" defer></script>
+<script src="purchase-order.js" defer></script>
 
 <div id="ledgerModal" style="
 display:none;
@@ -152,11 +138,11 @@ overflow-y:auto;
 overflow-x:hidden;
 ">
 
-<h3>Quotation History</h3>
+<h3>Purchase Order History</h3>
 <div id="ledgerPrintHeader" class="ledgerPrintHeader">
   <h1>VSTD COMPANY</h1>
   <p>11/33 Thadagam Rd, Edayarpalayam, Coimbatore - 641025</p>
-  <h2>Quotation History</h2>
+  <h2>Purchase Order History</h2>
 </div>
   <div id="ledgerPrintFilters" class="ledgerPrintFilters"></div>
 <div id="ledgerCount" style="font-size:12px;color:#555;margin-bottom:8px;"></div>
@@ -165,7 +151,7 @@ overflow-x:hidden;
 Date:
 <input type="date" id="fDate">
 
-Customer:
+Supplier:
 <input id="fClient">
 
 Product:
@@ -182,8 +168,8 @@ Product:
 <tr>
 <th>S.No</th>
 <th>Date</th>
-<th>Client</th>
-<th>Total</th>
+<th>Supplier</th>
+<th>Total Qty</th>
 <th>Open</th>
 </tr>
 </thead>

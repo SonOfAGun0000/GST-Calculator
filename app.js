@@ -291,8 +291,7 @@ function renderAutocompleteItems(input, items, onSelect){
       button.appendChild(meta);
     }
 
-    button.addEventListener("pointerdown", event => {
-      event.preventDefault();
+    button.addEventListener("click", () => {
       onSelect(item);
       closeAutocomplete();
     });
@@ -646,13 +645,27 @@ function generateNextQuoteNo(){
 //Hamburger Menu 
 //Open
 function toggleMenu(){
-  document.getElementById("sideMenu").classList.add("open");
-  document.getElementById("menuOverlay").classList.add("active");
+  const menu = document.getElementById("sideMenu");
+  const overlay = document.getElementById("menuOverlay");
+  const trigger = document.getElementById("menuToggle");
+  menu.classList.add("open");
+  menu.setAttribute("aria-hidden", "false");
+  overlay.classList.add("active");
+  document.body.classList.add("menu-open");
+  trigger?.setAttribute("aria-expanded", "true");
+  window.setTimeout(() => document.getElementById("menuClose")?.focus(), 0);
 }
 //Close
 function closeMenu(){
-  document.getElementById("sideMenu").classList.remove("open");
+  const menu = document.getElementById("sideMenu");
+  const wasOpen = menu.classList.contains("open");
+  menu.classList.remove("open");
+  menu.setAttribute("aria-hidden", "true");
   document.getElementById("menuOverlay").classList.remove("active");
+  document.body.classList.remove("menu-open");
+  const trigger = document.getElementById("menuToggle");
+  trigger?.setAttribute("aria-expanded", "false");
+  if(wasOpen) trigger?.focus();
 }
 
 function triggerPrint(){
@@ -1196,6 +1209,11 @@ function exportLedgerPDF(){
 }
 
 document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && document.getElementById("sideMenu")?.classList.contains("open")){
+    e.preventDefault();
+    closeMenu();
+    return;
+  }
   if(!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const key = e.key.toLowerCase();
   if(key === "s"){

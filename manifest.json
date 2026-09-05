@@ -1,6 +1,6 @@
 {
-  "name": "GST Quotation",
-  "short_name": "GST Quote by Sathish Sekar",
+  "name": "VSTD GST Calculator",
+  "short_name": "VSTD GST",
   "start_url": "index.html",
   "display": "standalone",
   "background_color": "#0f172a",

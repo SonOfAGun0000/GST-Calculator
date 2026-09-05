@@ -1,7 +1,8 @@
-const CACHE_NAME = "gst-quote-v7";
+const CACHE_NAME = "gst-quote-v8";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",
+  "./quotation.html",
   "./purchase-order.html",
   "./delivery-challan.html",
   "./product-master.html",
