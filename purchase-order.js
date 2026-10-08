@@ -721,6 +721,10 @@ function closeMenu(){
 function triggerPrint(){
   closeMenu();
   closeLedger();
+  if(window.VstdPdfIntegration?.shouldUseGeneratedPdf()){
+    window.VstdPdfIntegration.generateCurrentDocument("purchase-order");
+    return;
+  }
   window.print();
 }
 
@@ -1258,6 +1262,10 @@ function openFromLedger(no){
 function exportLedgerPDF(){
   closeMenu();
   updateLedgerPrintFilters();
+  if(window.VstdPdfIntegration?.shouldUseGeneratedPdf()){
+    window.VstdPdfIntegration.generateCurrentLedger("purchase-order");
+    return;
+  }
   document.body.classList.add("print-ledger");
   window.print();
 }

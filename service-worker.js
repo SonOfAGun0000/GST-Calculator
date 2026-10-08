@@ -1,4 +1,4 @@
-const CACHE_NAME = "gst-quote-v10";
+const CACHE_NAME = "gst-quote-v11";
 const FILES_TO_CACHE = [
   "./",
   "./index.html",
@@ -17,6 +17,12 @@ const FILES_TO_CACHE = [
   "./folio-master.js",
   "./item-master.js",
   "./sync.js",
+  "./pdf/pdf-integration.js",
+  "./pdf/pdf-export.js",
+  "./pdf/vendor/jspdf-4.2.1.umd.min.js",
+  "./pdf/vendor/jspdf-autotable-5.0.8.min.js",
+  "./pdf/fonts/NotoSans-Regular.ttf",
+  "./pdf/fonts/NotoSans-Bold.ttf",
   "./manifest.json",
   "./VSTD LOGO 3.0.png",
   "./icon-192.png",

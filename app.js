@@ -699,6 +699,10 @@ function closeMenu(){
 function triggerPrint(){
   closeMenu();
   closeLedger();
+  if(window.VstdPdfIntegration?.shouldUseGeneratedPdf()){
+    window.VstdPdfIntegration.generateCurrentDocument("quotation");
+    return;
+  }
   window.print();
 }
 
@@ -1299,6 +1303,10 @@ function openFromLedger(no){
 function exportLedgerPDF(){
   closeMenu();
   updateLedgerPrintFilters();
+  if(window.VstdPdfIntegration?.shouldUseGeneratedPdf()){
+    window.VstdPdfIntegration.generateCurrentLedger("quotation");
+    return;
+  }
   document.body.classList.add("print-ledger");
   window.print();
 }
