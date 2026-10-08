@@ -236,7 +236,7 @@ async function run() {
   }
 
   const sw = fs.readFileSync(path.join(projectRoot, "service-worker.js"), "utf8");
-  assert(sw.includes('gst-quote-v13'));
+  assert(sw.includes('gst-quote-v14'));
   for (const assetPath of [
     "autocomplete-positioning.js",
     "pdf/pdf-integration.js",

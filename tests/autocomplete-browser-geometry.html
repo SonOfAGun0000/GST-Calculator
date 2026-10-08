@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Autocomplete browser geometry test</title>
+  <style>
+    body { min-height: 1800px; margin: 0; font: 16px sans-serif; }
+    #fixedOrigin { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden; }
+    .testInput { position: absolute; left: 24px; width: min(260px, calc(100vw - 48px)); height: 40px; box-sizing: border-box; }
+    #firstInput { top: 100px; }
+    #lastInput { top: 1500px; }
+    #menu { position: fixed; display: none; box-sizing: border-box; border: 1px solid #333; overflow-y: auto; background: white; }
+    #menu.open { display: block; }
+    #result { position: fixed; right: 8px; top: 8px; z-index: 2; padding: 8px; background: white; }
+  </style>
+  <script src="../autocomplete-positioning.js"></script>
+</head>
+<body>
+  <div id="fixedOrigin"></div>
+  <input id="firstInput" class="testInput" value="First product row">
+  <input id="lastInput" class="testInput" value="Last product row">
+  <div id="menu"></div>
+  <output id="result">RUNNING</output>
+  <script>
+    history.scrollRestoration = "manual";
+    window.addEventListener("load", async function () {
+      const api = window.VstdAutocompleteLayout;
+      const origin = document.getElementById("fixedOrigin");
+      const menu = document.getElementById("menu");
+      const result = document.getElementById("result");
+      const failures = [];
+
+      function testInput(input, label) {
+        menu.classList.add("open");
+        menu.style.height = "320px";
+        if (!menu.children.length) {
+          for (let index = 0; index < 30; index += 1) {
+            const item = document.createElement("div");
+            item.style.height = "40px";
+            item.textContent = `Suggestion ${index + 1}`;
+            menu.appendChild(item);
+          }
+        }
+        const viewport = api.resolveAutocompleteViewport(origin.getBoundingClientRect(), window.visualViewport, {
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+        const inputRect = input.getBoundingClientRect();
+        const layout = api.calculateAutocompleteLayout(inputRect, viewport, 640);
+        if (!layout.visible) {
+          failures.push(`${label}: layout hidden`);
+          return;
+        }
+        const menuRect = api.applyAutocompleteLayout(menu, layout, viewport);
+        if (!api.autocompleteGeometryIsValid(layout, inputRect, menuRect, 4)) {
+          failures.push(`${label}: rendered geometry invalid`);
+        }
+        menu.scrollTop = 120;
+        const internallyScrolledRect = menu.getBoundingClientRect();
+        if (Math.abs(internallyScrolledRect.top - menuRect.top) > 0.5
+          || Math.abs(internallyScrolledRect.left - menuRect.left) > 0.5) {
+          failures.push(`${label}: internal suggestion scroll detached the menu`);
+        }
+      }
+
+      window.scrollTo(0, 0);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      testInput(document.getElementById("firstInput"), "first row");
+      window.scrollTo(0, 1200);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      testInput(document.getElementById("lastInput"), "last row after page scroll");
+
+      result.textContent = failures.length ? `FAIL: ${failures.join("; ")}` : "PASS";
+      result.dataset.status = failures.length ? "fail" : "pass";
+      document.title = `Autocomplete geometry: ${result.textContent}`;
+    });
+  </script>
+</body>
+</html>

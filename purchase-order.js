@@ -16,6 +16,7 @@ let selectedFolio = null;
 const AUTOCOMPLETE_LIMIT = 8;
 const autocompleteState = {
   container: null,
+  fixedOrigin: null,
   list: null,
   input: null,
   activeIndex: -1,
@@ -288,9 +289,14 @@ function ensureAutocompleteUI(){
   list.setAttribute("role", "listbox");
   container.appendChild(list);
 
+  const fixedOrigin = document.createElement("div");
+  fixedOrigin.className = "autocompleteFixedOrigin";
+  fixedOrigin.setAttribute("aria-hidden", "true");
+  document.body.appendChild(fixedOrigin);
   document.body.appendChild(container);
 
   autocompleteState.container = container;
+  autocompleteState.fixedOrigin = fixedOrigin;
   autocompleteState.list = list;
 
   document.addEventListener("pointerdown", event => {
@@ -350,17 +356,13 @@ function scheduleAutocompletePosition(){
 
 function currentAutocompleteViewport(){
   const visual = window.visualViewport;
-  return visual ? {
-    offsetLeft: visual.offsetLeft,
-    offsetTop: visual.offsetTop,
-    width: visual.width,
-    height: visual.height
-  } : {
-    offsetLeft: 0,
-    offsetTop: 0,
+  const layoutApi = window.VstdAutocompleteLayout;
+  const fixedOriginRect = autocompleteState.fixedOrigin.getBoundingClientRect();
+  const fallback = {
     width: window.innerWidth || document.documentElement.clientWidth,
     height: window.innerHeight || document.documentElement.clientHeight
   };
+  return layoutApi.resolveAutocompleteViewport(fixedOriginRect, visual, fallback);
 }
 
 function positionAutocomplete(){
@@ -373,9 +375,10 @@ function positionAutocomplete(){
 
   const rect = input.getBoundingClientRect();
   const layoutApi = window.VstdAutocompleteLayout;
+  const viewport = layoutApi && currentAutocompleteViewport();
   const layout = layoutApi && layoutApi.calculateAutocompleteLayout(
     rect,
-    currentAutocompleteViewport(),
+    viewport,
     autocompleteState.list.scrollHeight
   );
 
@@ -386,15 +389,16 @@ function positionAutocomplete(){
     return;
   }
 
-  autocompleteState.container.style.left = `${layout.left}px`;
-  autocompleteState.container.style.top = `${layout.top}px`;
-  autocompleteState.container.style.bottom = "auto";
-  autocompleteState.container.style.width = `${layout.width}px`;
-  autocompleteState.container.style.height = `${layout.height}px`;
-  autocompleteState.container.style.maxHeight = `${layout.height}px`;
   autocompleteState.container.classList.toggle("open-above", layout.placement === "above");
   autocompleteState.container.classList.toggle("compact", layout.compact);
   autocompleteState.container.classList.add("open");
+  const menuRect = layoutApi.applyAutocompleteLayout(autocompleteState.container, layout, viewport);
+  if(!layoutApi.autocompleteGeometryIsValid(layout, rect, menuRect, 4)){
+    autocompleteState.container.classList.remove("open");
+    autocompleteState.container.setAttribute("aria-hidden", "true");
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
   autocompleteState.container.setAttribute("aria-hidden", "false");
   input.setAttribute("aria-expanded", "true");
 }

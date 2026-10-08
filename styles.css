@@ -595,6 +595,15 @@ th,td{
   overflow:hidden;
   max-height:40vh;
 }
+.autocompleteFixedOrigin{
+  position:fixed;
+  left:0;
+  top:0;
+  width:0;
+  height:0;
+  visibility:hidden;
+  pointer-events:none;
+}
 .customAutocomplete.open{
   display:block;
 }
