@@ -18,9 +18,14 @@
   let generationPromise = null;
   let currentFile = null;
   let currentUrl = "";
+  let currentKind = "document";
   let modal = null;
 
-  function shouldUseGeneratedPdf(navigatorLike) {
+  function shouldUseGeneratedPdf() {
+    return true;
+  }
+
+  function isIosStandalone(navigatorLike) {
     const candidate = navigatorLike || (typeof navigator !== "undefined" ? navigator : null);
     return Boolean(candidate && candidate.standalone === true);
   }
@@ -79,6 +84,7 @@
   }
 
   function revokeCurrentUrl() {
+    if (modal && modal.previewFrame) modal.previewFrame.removeAttribute("src");
     if (currentUrl) {
       URL.revokeObjectURL(currentUrl);
       currentUrl = "";
@@ -113,9 +119,17 @@
       '  <p class="pdfReadyFile" hidden></p>',
       '  <div class="pdfReadyActions">',
       '    <button type="button" class="pdfShareButton" disabled>Share PDF</button>',
-      '    <button type="button" class="pdfOpenButton" disabled>Open / Save PDF</button>',
+      '    <button type="button" class="pdfDownloadButton" disabled>Download PDF</button>',
+      '    <button type="button" class="pdfPreviewButton" disabled>Preview PDF</button>',
+      '    <button type="button" class="pdfPrintButton">Browser Print</button>',
+      '    <button type="button" class="pdfDoneButton">Close</button>',
       '  </div>',
       '  <p class="pdfReadyHint">The PDF stays on this device until you choose where to share or save it.</p>',
+      '  <div class="pdfPreviewPanel" hidden>',
+      '    <div class="pdfPreviewHeader"><strong>PDF Preview</strong><button type="button" class="pdfPreviewBack">Close Preview</button></div>',
+      '    <iframe class="pdfPreviewFrame" title="Generated PDF preview"></iframe>',
+      '    <p>Preview uses the browser PDF viewer. For a clean attachment, use Share PDF above.</p>',
+      '  </div>',
       '</section>'
     ].join("");
     document.body.appendChild(overlay);
@@ -123,14 +137,23 @@
     const dialog = overlay.querySelector(".pdfReadyDialog");
     const closeButton = overlay.querySelector(".pdfReadyClose");
     const shareButton = overlay.querySelector(".pdfShareButton");
-    const openButton = overlay.querySelector(".pdfOpenButton");
+    const downloadButton = overlay.querySelector(".pdfDownloadButton");
+    const previewButton = overlay.querySelector(".pdfPreviewButton");
+    const printButton = overlay.querySelector(".pdfPrintButton");
+    const doneButton = overlay.querySelector(".pdfDoneButton");
+    const previewPanel = overlay.querySelector(".pdfPreviewPanel");
+    const previewFrame = overlay.querySelector(".pdfPreviewFrame");
+    const previewBack = overlay.querySelector(".pdfPreviewBack");
 
     function close() {
+      previewPanel.hidden = true;
+      previewFrame.removeAttribute("src");
       overlay.hidden = true;
       document.body.classList.remove("pdf-dialog-open");
     }
 
     closeButton.addEventListener("click", close);
+    doneButton.addEventListener("click", close);
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close();
     });
@@ -152,7 +175,7 @@
       }
 
       if (!supported) {
-        setModalState("ready", "File sharing is unavailable here. Use Open / Save PDF instead.");
+        setModalState("ready", "File sharing is unavailable here. Use Download PDF or Preview PDF instead.");
         return;
       }
 
@@ -170,19 +193,55 @@
       );
     });
 
-    openButton.addEventListener("click", function () {
+    downloadButton.addEventListener("click", function () {
       if (!currentFile) return;
       if (!currentUrl) currentUrl = URL.createObjectURL(currentFile);
       const anchor = document.createElement("a");
       anchor.href = currentUrl;
-      anchor.target = "_blank";
-      anchor.rel = "noopener";
       anchor.download = currentFile.name;
+      anchor.hidden = true;
+      document.body.appendChild(anchor);
       anchor.click();
-      setModalState("ready", "PDF opened. Use the iPhone share controls to save or send it.");
+      window.setTimeout(() => anchor.remove(), 0);
+      setModalState("ready", isIosStandalone()
+        ? "Download requested. On iPhone, use Share PDF → Save to Files when a direct download is not offered."
+        : "Download requested. Check your browser downloads; completion cannot be confirmed by the app.");
     });
 
-    modal = { overlay, closeButton, shareButton, openButton };
+    previewButton.addEventListener("click", function () {
+      if (!currentFile) return;
+      if (!currentUrl) currentUrl = URL.createObjectURL(currentFile);
+      previewFrame.src = currentUrl;
+      previewPanel.hidden = false;
+      previewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      setModalState("ready", "Preview opened below. Share PDF sends the actual file without an application or blob URL payload.");
+    });
+
+    previewBack.addEventListener("click", function () {
+      previewPanel.hidden = true;
+      previewFrame.removeAttribute("src");
+      previewButton.focus();
+    });
+
+    printButton.addEventListener("click", function () {
+      previewPanel.hidden = true;
+      previewFrame.removeAttribute("src");
+      overlay.hidden = true;
+      document.body.classList.remove("pdf-dialog-open");
+      document.body.classList.toggle("print-ledger", currentKind === "ledger");
+      window.print();
+    });
+
+    modal = {
+      overlay,
+      closeButton,
+      shareButton,
+      downloadButton,
+      previewButton,
+      printButton,
+      previewPanel,
+      previewFrame
+    };
     return modal;
   }
 
@@ -192,7 +251,7 @@
       return;
     }
     const message = error && error.message ? error.message : "The share sheet could not be opened.";
-    setModalState("ready", `${message} Use Open / Save PDF instead.`);
+    setModalState("ready", `${message} Use Download PDF or Preview PDF instead.`);
   }
 
   function setModalState(state, message) {
@@ -208,7 +267,12 @@
     fileInfo.hidden = !ready;
     fileInfo.textContent = ready ? `${currentFile.name} · ${formatBytes(currentFile.size)}` : "";
     view.shareButton.disabled = !ready;
-    view.openButton.disabled = !ready;
+    view.downloadButton.disabled = !ready;
+    view.previewButton.disabled = !ready;
+    if (!ready) {
+      view.previewPanel.hidden = true;
+      view.previewFrame.removeAttribute("src");
+    }
   }
 
   function showModal() {
@@ -226,6 +290,7 @@
     }
 
     clearCurrentPdf();
+    currentKind = kind;
     showModal();
     setModalState("generating", "Generating locally…");
 
@@ -244,7 +309,7 @@
         type: "application/pdf",
         lastModified: Date.now()
       });
-      setModalState("ready", "Your PDF was generated locally and is ready to share or open.");
+      setModalState("ready", "Your PDF was generated locally and is ready to share, download, or preview.");
       return result;
     })().catch((error) => {
       console.error("PDF generation failed:", error);
@@ -274,6 +339,7 @@
 
   return {
     shouldUseGeneratedPdf,
+    isIosStandalone,
     generateCurrentDocument,
     generateCurrentLedger,
     _test: { formatBytes, isShareCancellation }

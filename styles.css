@@ -734,7 +734,7 @@ body.pdf-dialog-open{
 }
 .pdfReadyDialog{
   position:relative;
-  width:min(100%, 430px);
+  width:min(100%, 760px);
   max-height:calc(100dvh - 40px);
   overflow-y:auto;
   padding:24px 20px 20px;
@@ -768,6 +768,7 @@ body.pdf-dialog-open{
 }
 .pdfReadyActions{
   display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
   gap:10px;
 }
 .pdfReadyActions button{
@@ -783,7 +784,10 @@ body.pdf-dialog-open{
   background:#991b2b;
   color:#fff;
 }
-.pdfOpenButton{
+.pdfDownloadButton,
+.pdfPreviewButton,
+.pdfPrintButton,
+.pdfDoneButton{
   background:#e8eaed;
   color:#18212b;
 }
@@ -809,6 +813,58 @@ body.pdf-dialog-open{
   color:#59636f;
   font-size:13px;
   line-height:1.4;
+}
+.pdfPreviewPanel{
+  margin-top:18px;
+  border:1px solid #c8cdd3;
+  border-radius:10px;
+  overflow:hidden;
+  background:#f4f5f7;
+}
+.pdfPreviewPanel[hidden]{
+  display:none;
+}
+.pdfPreviewHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 12px;
+  background:#e8eaed;
+}
+.pdfPreviewBack{
+  min-height:40px;
+  border:0;
+  border-radius:8px;
+  padding:8px 12px;
+  background:#fff;
+  color:#18212b;
+  font:inherit;
+  font-weight:700;
+}
+.pdfPreviewFrame{
+  display:block;
+  width:100%;
+  height:min(62vh, 650px);
+  border:0;
+  background:#fff;
+}
+.pdfPreviewPanel p{
+  margin:0;
+  padding:9px 12px;
+  color:#59636f;
+  font-size:12px;
+}
+@media (max-width:520px){
+  .pdfReadyActions{
+    grid-template-columns:1fr;
+  }
+  .pdfReadyDialog{
+    padding-inline:16px;
+  }
+  .pdfPreviewFrame{
+    height:52vh;
+  }
 }
 
 @media print{

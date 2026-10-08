@@ -16,6 +16,8 @@
   const PAGE_HEIGHT = 297;
   const MARGIN = 14;
   const BRAND = [153, 27, 43];
+  const DATA_TEXT = [17, 17, 17];
+  const LABEL_TEXT = [55, 65, 81];
 
   const DEFAULT_BUSINESS = Object.freeze({
     name: "VSTD COMPANY",
@@ -243,7 +245,7 @@
   }
 
   function drawHeader(doc, model, assets) {
-    doc.setTextColor(24, 33, 43);
+    doc.setTextColor.apply(doc, DATA_TEXT);
     doc.setFont("NotoSans", "bold");
     doc.setFontSize(19);
     doc.text(model.business.name, MARGIN, 18);
@@ -267,10 +269,11 @@
     doc.setFontSize(16);
     doc.text(model.documentType === "purchase-order" ? "PURCHASE ORDER" : "QUOTATION", PAGE_WIDTH / 2, 38, { align: "center" });
 
-    doc.setTextColor(24, 33, 43);
+    doc.setTextColor.apply(doc, LABEL_TEXT);
     doc.setFontSize(9);
     doc.text(model.documentType === "purchase-order" ? "PO No" : "Quotation No", MARGIN, 47);
     doc.text("Date", 140, 47);
+    doc.setTextColor.apply(doc, DATA_TEXT);
     doc.setFontSize(11);
     doc.text(model.documentNumber || "Draft", MARGIN, 53);
     doc.text(formatDate(model.date) || "—", 140, 53);
@@ -288,10 +291,12 @@
 
     let y = startY;
     rows.forEach(([field, value]) => {
+      doc.setTextColor.apply(doc, LABEL_TEXT);
       doc.setFont("NotoSans", "bold");
       doc.setFontSize(8.5);
       doc.text(`${field}:`, MARGIN, y);
       doc.setFont("NotoSans", "normal");
+      doc.setTextColor.apply(doc, DATA_TEXT);
       const wrapped = doc.splitTextToSize(value, 145);
       doc.text(wrapped, 46, y);
       y += Math.max(5, wrapped.length * 4.2);
@@ -313,7 +318,8 @@
       theme: "grid",
       styles: { font: "NotoSans", fontSize: 8.5, cellPadding: 2.2, lineColor: BRAND, lineWidth: 0.25 },
       headStyles: { font: "NotoSans", fontStyle: "bold", fillColor: BRAND, textColor: [255, 255, 255] },
-      bodyStyles: { font: "NotoSans", fontStyle: "normal", textColor: [24, 33, 43] }
+      bodyStyles: { font: "NotoSans", fontStyle: "normal", textColor: DATA_TEXT },
+      alternateRowStyles: { textColor: DATA_TEXT }
     });
     return doc.lastAutoTable.finalY + 4;
   }
@@ -346,10 +352,13 @@
         cellPadding: 2.25,
         lineColor: [93, 105, 117],
         lineWidth: 0.15,
+        textColor: DATA_TEXT,
         overflow: "linebreak",
         valign: "middle"
       },
       headStyles: { font: "NotoSans", fontStyle: "bold", fillColor: BRAND, textColor: [255, 255, 255], halign: "center" },
+      bodyStyles: { textColor: DATA_TEXT },
+      alternateRowStyles: { textColor: DATA_TEXT },
       columnStyles: purchaseOrder ? {
         0: { cellWidth: 14, halign: "center" },
         1: { cellWidth: 132 },
@@ -377,7 +386,11 @@
       doc.setFont("NotoSans", "bold");
       doc.setFontSize(12);
       doc.setTextColor.apply(doc, BRAND);
-      doc.text(`Total Qty: ${indian(model.totals.totalQuantity)}`, PAGE_WIDTH - MARGIN, y, { align: "right" });
+      const totalValue = indian(model.totals.totalQuantity);
+      const right = PAGE_WIDTH - MARGIN;
+      doc.text("Total Qty:", right - doc.getTextWidth(totalValue) - 2, y, { align: "right" });
+      doc.setTextColor.apply(doc, DATA_TEXT);
+      doc.text(totalValue, right, y, { align: "right" });
       return;
     }
 
@@ -400,8 +413,9 @@
       const grand = index === lines.length - 1;
       doc.setFont("NotoSans", grand ? "bold" : "normal");
       doc.setFontSize(grand ? 12 : 9);
-      doc.setTextColor.apply(doc, grand ? BRAND : [24, 33, 43]);
+      doc.setTextColor.apply(doc, grand ? BRAND : LABEL_TEXT);
       doc.text(label, left, y);
+      doc.setTextColor.apply(doc, DATA_TEXT);
       doc.text(currency(value), right, y, { align: "right" });
       y += grand ? 8 : 5.5;
     });
@@ -434,7 +448,7 @@
       doc.line(MARGIN, 279, PAGE_WIDTH - MARGIN, 279);
       doc.setFont("NotoSans", "normal");
       doc.setFontSize(7.5);
-      doc.setTextColor(55, 65, 81);
+      doc.setTextColor.apply(doc, LABEL_TEXT);
       doc.text(
         `Questions? Contact ${model.business.contactName} | ${model.business.contactPhone}`,
         MARGIN,
@@ -483,7 +497,7 @@
       creator: "VSTD GST Calculator offline PDF"
     });
 
-    doc.setTextColor(24, 33, 43);
+    doc.setTextColor.apply(doc, DATA_TEXT);
     doc.setFont("NotoSans", "bold");
     doc.setFontSize(19);
     doc.text(business.name, MARGIN, 18);
@@ -502,7 +516,7 @@
     doc.text(model.title || (purchaseOrder ? "PURCHASE ORDER HISTORY" : "QUOTATION HISTORY"), PAGE_WIDTH / 2, 38, { align: "center" });
     let startY = 47;
     if (model.filters) {
-      doc.setTextColor(55, 65, 81);
+      doc.setTextColor.apply(doc, DATA_TEXT);
       doc.setFont("NotoSans", "normal");
       doc.setFontSize(8.5);
       const filterLines = doc.splitTextToSize(model.filters, PAGE_WIDTH - MARGIN * 2);
@@ -523,8 +537,10 @@
       pageBreak: "auto",
       margin: { top: 19, right: MARGIN, bottom: 24, left: MARGIN },
       theme: "grid",
-      styles: { font: "NotoSans", fontStyle: "normal", fontSize: 8.3, cellPadding: 2.4, lineColor: [93, 105, 117], lineWidth: 0.15 },
+      styles: { font: "NotoSans", fontStyle: "normal", fontSize: 8.3, cellPadding: 2.4, lineColor: [93, 105, 117], lineWidth: 0.15, textColor: DATA_TEXT },
       headStyles: { font: "NotoSans", fontStyle: "bold", fillColor: BRAND, textColor: [255, 255, 255], halign: "center" },
+      bodyStyles: { textColor: DATA_TEXT },
+      alternateRowStyles: { textColor: DATA_TEXT },
       columnStyles: {
         0: { cellWidth: 22, halign: "center" },
         1: { cellWidth: 35 },
