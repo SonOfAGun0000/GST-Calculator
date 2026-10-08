@@ -17,7 +17,10 @@ const AUTOCOMPLETE_LIMIT = 8;
 const autocompleteState = {
   container: null,
   list: null,
-  input: null
+  input: null,
+  activeIndex: -1,
+  pointerActive: false,
+  positionFrame: 0
 };
 
 document.addEventListener("DOMContentLoaded", function(){
@@ -223,7 +226,9 @@ function ensureAutocompleteUI(){
   container.setAttribute("aria-hidden", "true");
 
   const list = document.createElement("div");
+  list.id = "customAutocompleteList";
   list.className = "customAutocompleteList";
+  list.setAttribute("role", "listbox");
   container.appendChild(list);
 
   document.body.appendChild(container);
@@ -237,23 +242,68 @@ function ensureAutocompleteUI(){
     closeAutocomplete();
   });
 
-  window.addEventListener("resize", positionAutocomplete);
-  window.addEventListener("scroll", positionAutocomplete, true);
+  container.addEventListener("pointerdown", () => {
+    autocompleteState.pointerActive = true;
+  });
+  const endPointerInteraction = () => {
+    window.setTimeout(() => { autocompleteState.pointerActive = false; }, 0);
+  };
+  container.addEventListener("pointerup", endPointerInteraction);
+  container.addEventListener("pointercancel", endPointerInteraction);
+
+  window.addEventListener("resize", scheduleAutocompletePosition);
+  window.addEventListener("scroll", scheduleAutocompletePosition, true);
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", scheduleAutocompletePosition);
+    window.visualViewport.addEventListener("scroll", scheduleAutocompletePosition);
+  }
   return autocompleteState;
 }
 
 function closeAutocomplete(){
   ensureAutocompleteUI();
+  if(autocompleteState.positionFrame){
+    window.cancelAnimationFrame(autocompleteState.positionFrame);
+    autocompleteState.positionFrame = 0;
+  }
+  if(autocompleteState.input){
+    autocompleteState.input.setAttribute("aria-expanded", "false");
+  }
   autocompleteState.container.classList.remove("open");
+  autocompleteState.container.classList.remove("open-above", "compact");
   autocompleteState.container.setAttribute("aria-hidden", "true");
   autocompleteState.list.innerHTML = "";
   autocompleteState.input = null;
+  autocompleteState.activeIndex = -1;
 }
 
 function closeAutocompleteForInput(input){
   if(autocompleteState.input === input){
     closeAutocomplete();
   }
+}
+
+function scheduleAutocompletePosition(){
+  if(autocompleteState.positionFrame) return;
+  autocompleteState.positionFrame = window.requestAnimationFrame(() => {
+    autocompleteState.positionFrame = 0;
+    positionAutocomplete();
+  });
+}
+
+function currentAutocompleteViewport(){
+  const visual = window.visualViewport;
+  return visual ? {
+    offsetLeft: visual.offsetLeft,
+    offsetTop: visual.offsetTop,
+    width: visual.width,
+    height: visual.height
+  } : {
+    offsetLeft: 0,
+    offsetTop: 0,
+    width: window.innerWidth || document.documentElement.clientWidth,
+    height: window.innerHeight || document.documentElement.clientHeight
+  };
 }
 
 function positionAutocomplete(){
@@ -265,28 +315,52 @@ function positionAutocomplete(){
   }
 
   const rect = input.getBoundingClientRect();
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-  const maxWidth = Math.max(120, viewportWidth - 16);
-  const width = Math.min(Math.max(rect.width, 120), maxWidth);
-  const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
-  const spaceBelow = viewportHeight - rect.bottom - 8;
-  const spaceAbove = rect.top - 8;
-  const openAbove = spaceBelow < 120 && spaceAbove > spaceBelow;
-  const menuHeight = openAbove
-    ? Math.max(64, spaceAbove - 8)
-    : Math.max(64, spaceBelow);
+  const layoutApi = window.VstdAutocompleteLayout;
+  const layout = layoutApi && layoutApi.calculateAutocompleteLayout(
+    rect,
+    currentAutocompleteViewport(),
+    autocompleteState.list.scrollHeight
+  );
 
-  autocompleteState.container.style.left = `${left}px`;
-  autocompleteState.container.style.width = `${width}px`;
-  autocompleteState.container.style.maxHeight = `${menuHeight}px`;
+  if(!layout || !layout.visible){
+    autocompleteState.container.classList.remove("open");
+    autocompleteState.container.setAttribute("aria-hidden", "true");
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
 
-  if(openAbove){
-    autocompleteState.container.style.top = "auto";
-    autocompleteState.container.style.bottom = `${Math.max(8, viewportHeight - rect.top + 4)}px`;
-  }else{
-    autocompleteState.container.style.bottom = "auto";
-    autocompleteState.container.style.top = `${Math.max(8, rect.bottom + 4)}px`;
+  autocompleteState.container.style.left = `${layout.left}px`;
+  autocompleteState.container.style.top = `${layout.top}px`;
+  autocompleteState.container.style.bottom = "auto";
+  autocompleteState.container.style.width = `${layout.width}px`;
+  autocompleteState.container.style.height = `${layout.height}px`;
+  autocompleteState.container.style.maxHeight = `${layout.height}px`;
+  autocompleteState.container.classList.toggle("open-above", layout.placement === "above");
+  autocompleteState.container.classList.toggle("compact", layout.compact);
+  autocompleteState.container.classList.add("open");
+  autocompleteState.container.setAttribute("aria-hidden", "false");
+  input.setAttribute("aria-expanded", "true");
+}
+
+function setAutocompleteActiveIndex(index){
+  const buttons = Array.from(autocompleteState.list.querySelectorAll(".customAutocompleteItem"));
+  if(!buttons.length){
+    autocompleteState.activeIndex = -1;
+    return;
+  }
+  autocompleteState.activeIndex = (index + buttons.length) % buttons.length;
+  buttons.forEach((button, buttonIndex) => {
+    const active = buttonIndex === autocompleteState.activeIndex;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const activeButton = buttons[autocompleteState.activeIndex];
+  const listTop = autocompleteState.list.scrollTop;
+  const listBottom = listTop + autocompleteState.list.clientHeight;
+  if(activeButton.offsetTop < listTop){
+    autocompleteState.list.scrollTop = activeButton.offsetTop;
+  }else if(activeButton.offsetTop + activeButton.offsetHeight > listBottom){
+    autocompleteState.list.scrollTop = activeButton.offsetTop + activeButton.offsetHeight - autocompleteState.list.clientHeight;
   }
 }
 
@@ -298,13 +372,20 @@ function renderAutocompleteItems(input, items, onSelect){
     return;
   }
 
+  if(autocompleteState.input && autocompleteState.input !== input){
+    autocompleteState.input.setAttribute("aria-expanded", "false");
+  }
   autocompleteState.input = input;
+  autocompleteState.activeIndex = -1;
   autocompleteState.list.innerHTML = "";
 
   items.slice(0, AUTOCOMPLETE_LIMIT).forEach(item => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "customAutocompleteItem";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", "false");
+    button.tabIndex = -1;
 
     const label = document.createElement("span");
     label.className = "customAutocompleteMain";
@@ -318,6 +399,9 @@ function renderAutocompleteItems(input, items, onSelect){
       button.appendChild(meta);
     }
 
+    button.addEventListener("pointerdown", event => {
+      if(event.pointerType === "mouse") event.preventDefault();
+    });
     button.addEventListener("click", () => {
       onSelect(item);
       closeAutocomplete();
@@ -326,6 +410,10 @@ function renderAutocompleteItems(input, items, onSelect){
     autocompleteState.list.appendChild(button);
   });
 
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", "customAutocompleteList");
+  autocompleteState.container.style.height = "auto";
+  autocompleteState.container.style.maxHeight = "320px";
   autocompleteState.container.classList.add("open");
   autocompleteState.container.setAttribute("aria-hidden", "false");
   positionAutocomplete();
@@ -347,14 +435,40 @@ function bindAutocomplete(input, getItems, onSelect){
   input.addEventListener("input", refresh);
   input.addEventListener("keydown", event => {
     if(event.key === "Escape"){
+      event.preventDefault();
       closeAutocompleteForInput(input);
+      return;
     }
-    if(event.key === "Enter"){
+    if(event.key === "ArrowDown" || event.key === "ArrowUp"){
+      if(autocompleteState.input !== input || !autocompleteState.list.children.length) return;
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = autocompleteState.activeIndex < 0
+        ? (direction > 0 ? 0 : autocompleteState.list.children.length - 1)
+        : autocompleteState.activeIndex + direction;
+      setAutocompleteActiveIndex(nextIndex);
+      return;
+    }
+    if(event.key === "Enter" && autocompleteState.input === input){
+      event.preventDefault();
+      const active = autocompleteState.list.querySelectorAll(".customAutocompleteItem")[autocompleteState.activeIndex];
+      if(active) active.click();
+      else closeAutocompleteForInput(input);
+      return;
+    }
+    if(event.key === "Tab"){
       closeAutocompleteForInput(input);
     }
   });
   input.addEventListener("blur", () => {
-    window.setTimeout(() => closeAutocompleteForInput(input), 120);
+    const closeAfterPointer = () => {
+      if(autocompleteState.pointerActive){
+        window.setTimeout(closeAfterPointer, 80);
+        return;
+      }
+      closeAutocompleteForInput(input);
+    };
+    window.setTimeout(closeAfterPointer, 160);
   });
 }
 

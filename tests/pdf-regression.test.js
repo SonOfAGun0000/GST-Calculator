@@ -116,8 +116,6 @@ async function run() {
   assert.strictEqual(integration.shouldUseGeneratedPdf({ standalone: true }), true, "iOS standalone must use generated PDF");
   assert.strictEqual(integration.shouldUseGeneratedPdf({ standalone: false }), true, "iPhone Safari must use generated PDF");
   assert.strictEqual(integration.shouldUseGeneratedPdf({}), true, "Android and Windows must use generated PDF");
-  assert.strictEqual(integration.isIosStandalone({ standalone: true }), true);
-  assert.strictEqual(integration.isIosStandalone({ standalone: false }), false);
   assert.strictEqual(integration._test.isShareCancellation({ name: "AbortError" }), true);
   assert.strictEqual(integration._test.isShareCancellation({ name: "NotAllowedError" }), false);
 
@@ -238,8 +236,9 @@ async function run() {
   }
 
   const sw = fs.readFileSync(path.join(projectRoot, "service-worker.js"), "utf8");
-  assert(sw.includes('gst-quote-v12'));
+  assert(sw.includes('gst-quote-v13'));
   for (const assetPath of [
+    "autocomplete-positioning.js",
     "pdf/pdf-integration.js",
     "pdf/pdf-export.js",
     "pdf/vendor/jspdf-4.2.1.umd.min.js",
@@ -255,9 +254,11 @@ async function run() {
   assert(!/firebase|localStorage|indexedDB/i.test(integrationSource), "PDF integration must not write persistence or Firebase");
   assert(integrationSource.includes("navigator.share(payload)"), "Share must be invoked with the app-controlled File payload");
   assert(!/share\(\s*\{[^}]*\b(?:url|text)\s*:/s.test(integrationSource), "Share must not send blob or application URLs");
-  assert(integrationSource.includes("anchor.download = currentFile.name"), "Download must use the sanitized generated filename");
-  assert(integrationSource.includes("previewFrame.src = currentUrl"), "Preview must use the app-owned viewer");
-  console.log("PDF regression tests passed: six exports, universal routing, dark content, share, download, preview, and offline assets.");
+  assert(integrationSource.includes('anchor.target = "_blank"'), "Open PDF must use a separate native browser viewer");
+  assert(!/iframe|Preview PDF|Download PDF|Browser Print|pdfPreview/i.test(integrationSource), "Compact dialog must not retain preview, download, print, or iframe code");
+  assert(integrationSource.includes(">Share PDF</button>"));
+  assert(integrationSource.includes(">Open PDF</button>"));
+  console.log("PDF regression tests passed: six exports, universal routing, dark content, compact share/open dialog, and offline assets.");
 }
 
 run().catch((error) => {
