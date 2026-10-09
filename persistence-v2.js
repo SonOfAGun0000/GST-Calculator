@@ -902,6 +902,19 @@
     return results.filter(document => document.entityType === entityType);
   }
 
+  async function getNumberHighWater(entityType){
+    const type = validateEntityType(entityType);
+    const { database } = await requireReady();
+    const transaction = database.transaction("meta", "readonly");
+    const done = transactionDone(transaction);
+    const result = await requestResult(
+      transaction.objectStore("meta").get(`number:${type}`)
+    );
+    await done;
+    const value = Number(result?.value);
+    return Number.isSafeInteger(value) && value > 0 ? value : 0;
+  }
+
   async function listPendingOperations(options = {}){
     const { database } = await requireReady();
     const transaction = database.transaction("outbox", "readonly");
@@ -1030,6 +1043,7 @@
     getDocument,
     listDocuments,
     findDocumentsByBusinessNumber,
+    getNumberHighWater,
     listPendingOperations,
     markOperationAttempt,
     markOperationComplete,

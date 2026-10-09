@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Repository v2: RUNNING</title>
+</head>
+<body>
+  <pre id="result">RUNNING</pre>
+  <script>
+    (() => {
+      const values = new Map([
+        ["gst_quotes_history", JSON.stringify([
+          { qno: 1, client: "Legacy A", savedAt: 100, items: [] },
+          { qno: 1, client: "Legacy A", savedAt: 100, items: [] }
+        ])],
+        ["gst_purchase_orders_history", JSON.stringify([
+          { qno: 5, client: "Legacy supplier", savedAt: 200, items: [] }
+        ])],
+        ["gst_last_qno", "8"],
+        ["gst_last_pono", "6"]
+      ]);
+      const databaseName = `vstd-gst-calculator-test-repository-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      window.__repositoryTestState = {
+        databaseName,
+        storage: {
+          getItem: key => values.has(key) ? values.get(key) : null,
+          setItem: (key, value) => values.set(key, String(value)),
+          removeItem: key => values.delete(key)
+        },
+        values,
+        networkCalls: 0
+      };
+      window.fetch = (...args) => {
+        window.__repositoryTestState.networkCalls += 1;
+        return Promise.reject(new Error(`Unexpected network request: ${args[0]}`));
+      };
+      window.__VSTD_PERSISTENCE_V2_TEST_CONFIG__ = {
+        enabled: true,
+        databaseName,
+        storage: window.__repositoryTestState.storage
+      };
+    })();
+  </script>
+  <script src="../persistence-v2.js"></script>
+  <script>
+    window.__VSTD_REPOSITORY_V2_TEST_CONFIG__ = {
+      enabled: true,
+      storage: window.__repositoryTestState.storage
+    };
+  </script>
+  <script src="../repository-v2.js"></script>
+  <script>
+    (async () => {
+      const output = document.getElementById("result");
+      const state = window.__repositoryTestState;
+      const persistence = window.vstdPersistenceV2;
+      const repository = window.vstdRepositoryV2;
+      const results = [];
+
+      function assert(condition, message){
+        if(!condition) throw new Error(message);
+      }
+
+      async function test(name, run){
+        await run();
+        results.push(name);
+      }
+
+      function mockPersistence(overrides = {}){
+        return {
+          databaseName: "vstd-gst-calculator-test-mock",
+          listDocuments: async () => [],
+          getNumberHighWater: async () => 0,
+          listPendingOperations: async () => [],
+          ...overrides
+        };
+      }
+
+      try{
+        await test("disposable IndexedDB readiness", async () => {
+          const ready = await persistence.ready;
+          assert(ready.ok, `Persistence was not ready: ${ready.error || "unknown"}`);
+          assert(persistence.databaseVersion === 1, "Physical database version changed");
+          assert(persistence.databaseName.startsWith("vstd-gst-calculator-test-"), "Production database name was used");
+        });
+
+        await test("migrated legacy history deduplicates projections", async () => {
+          const history = await repository.listHistory("quotation", { order: "asc" });
+          assert(history.complete, "Migrated legacy history should be complete");
+          assert(history.records.length === 2, `Expected two logical legacy records, got ${history.records.length}`);
+          assert(history.records.every(record => record.metadata.sources.includes("indexedDB")), "Stable IndexedDB identities were not retained");
+          assert(history.records.every(record => record.metadata.sources.includes("localStorage")), "Local projections were not recognized");
+        });
+
+        await test("distinct IDs with the same business number remain conflicts", async () => {
+          const found = await repository.findByBusinessNumber("quotation", 1);
+          assert(found.records.length === 2, "Distinct duplicate identities were merged");
+          assert(found.conflicts.length === 1, "Business-number identity conflict was not exposed");
+          assert(new Set(found.records.map(record => record.recordId)).size === 2, "Distinct record IDs were lost");
+        });
+
+        const quoteCreate = await persistence.commitDocumentWithOutbox({
+          mode: "create",
+          recordId: "quotation:future:4",
+          entityType: "quotation",
+          businessNumber: 4,
+          payload: { qno: 4, client: "IndexedDB only", savedAt: 300, items: [] },
+          updatedAt: 300
+        });
+        const quoteUpdate = await persistence.commitDocumentWithOutbox({
+          mode: "update",
+          recordId: "quotation:future:4",
+          entityType: "quotation",
+          businessNumber: 4,
+          expectedRevision: 1,
+          payload: { qno: 4, client: "IndexedDB revision two", savedAt: 400, items: [] },
+          updatedAt: 400
+        });
+        await persistence.commitDocumentWithOutbox({
+          mode: "create",
+          recordId: "purchaseOrder:future:7",
+          entityType: "purchaseOrder",
+          businessNumber: 7,
+          payload: { qno: 7, client: "IndexedDB supplier", savedAt: 500, items: [] },
+          updatedAt: 500
+        });
+
+        await test("v2-only and mixed history remain visible", async () => {
+          const quotes = await repository.listHistory("quotation");
+          const orders = await repository.listHistory("purchaseOrder");
+          assert(quotes.records.some(record => record.recordId === "quotation:future:4"), "Future quotation was omitted");
+          assert(orders.records.some(record => record.recordId === "purchaseOrder:future:7"), "Future purchase order was omitted");
+          assert(orders.records.some(record => record.recordId.startsWith("legacy:po:5")), "Legacy PO was omitted from mixed history");
+        });
+
+        await test("v2-only history works without a legacy projection", async () => {
+          const emptyStorage = { getItem: () => null };
+          const isolated = repository.createTestRepository({
+            persistence: mockPersistence({
+              listDocuments: async entityType => entityType === "quotation" ? [{
+                recordId: "quotation:v2-only:12",
+                entityType: "quotation",
+                businessNumber: 12,
+                schemaVersion: 2,
+                revision: 1,
+                baseRevision: 0,
+                deleted: false,
+                payload: { qno: 12, client: "Only in IndexedDB" }
+              }] : []
+            }),
+            storage: emptyStorage
+          });
+          const history = await isolated.listHistory("quotation");
+          assert(history.complete, "V2-only history should be complete");
+          assert(history.records.length === 1 && history.records[0].recordId === "quotation:v2-only:12", "V2-only record was omitted");
+        });
+
+        await test("reopen by stable recordId preserves revision metadata", async () => {
+          const reopened = await repository.getDocument("quotation:future:4");
+          assert(reopened.record?.recordId === "quotation:future:4", "Stable record was not reopened");
+          assert(reopened.record.revision === 2, "Current revision metadata was not returned");
+          assert(reopened.record.baseRevision === 1, "Base revision metadata was not returned");
+          assert(reopened.record.payload.client === "IndexedDB revision two", "Current payload was not returned");
+          assert(quoteCreate.document.revision === 1 && quoteUpdate.document.revision === 2, "Persistence revision setup failed");
+        });
+
+        await test("number floor is monotonic across both stores", async () => {
+          const quotation = await repository.getNextNumberFloor("quotation");
+          const order = await repository.getNextNumberFloor("purchaseOrder");
+          assert(quotation.localStorageHighWater === 8, "Quotation local high-water was missed");
+          assert(quotation.indexedDBHighWater === 4, "Quotation IndexedDB high-water was missed");
+          assert(quotation.nextNumberFloor === 9, "Quotation next-number floor decreased");
+          assert(order.nextNumberFloor === 8, "PO next-number floor is incorrect");
+          assert(!quotation.crossDeviceUnique, "Offline global uniqueness was incorrectly claimed");
+        });
+
+        await test("complete versioned backup snapshot", async () => {
+          const backup = await repository.createBackupSnapshot({ exportedAt: 123456 });
+          assert(backup.format === "vstd-gst-calculator-backup" && backup.version === 2, "Backup format is incorrect");
+          assert(backup.complete, `Backup unexpectedly incomplete: ${JSON.stringify(backup.issues)}`);
+          assert(backup.documents.some(document => document.recordId === "quotation:future:4"), "V2 quotation missing from backup");
+          assert(backup.documents.some(document => document.recordId.startsWith("legacy:quotation:1")), "Legacy document missing from backup");
+          assert(backup.pendingOperations.length === 3, "Pending recovery operations missing from backup");
+          assert(backup.localStorage.quotation.raw, "Exact legacy JSON source was not retained");
+          assert(backup.restoreActivated === false, "Restore was unexpectedly activated");
+        });
+
+        await test("legacy backups validate but cannot overwrite silently", async () => {
+          const inspection = await repository.inspectBackup(
+            JSON.stringify([{ qno: 4, client: "Old legacy copy", items: [] }]),
+            { entityType: "quotation" }
+          );
+          assert(inspection.valid && inspection.version === 1, "Legacy backup compatibility failed");
+          assert(!inspection.canRestore && !inspection.restoreActivated, "Legacy restore was activated");
+          assert(inspection.conflicts.some(conflict => conflict.code === "LEGACY_IMPORT_IDENTITY_AMBIGUOUS"), "Legacy identity risk was not reported");
+        });
+
+        await test("stale v2 backup revisions are reported", async () => {
+          const backup = await repository.createBackupSnapshot({ exportedAt: 123456 });
+          const stale = JSON.parse(JSON.stringify(backup));
+          const document = stale.documents.find(item => item.recordId === "quotation:future:4");
+          document.revision = 1;
+          const inspection = await repository.inspectBackup(stale);
+          assert(inspection.conflicts.some(conflict => conflict.code === "STALE_BACKUP_REVISION"), "Stale revision was not reported");
+          assert(!inspection.canRestore, "Restore should remain inactive");
+        });
+
+        await test("older legacy projection cannot replace a newer IndexedDB revision", async () => {
+          const oldStorage = {
+            getItem: key => key === "gst_quotes_history"
+              ? JSON.stringify([{ qno: 15, client: "Old imported content", items: [] }])
+              : null
+          };
+          const isolated = repository.createTestRepository({
+            persistence: mockPersistence({
+              listDocuments: async entityType => entityType === "quotation" ? [{
+                recordId: "legacy:quotation:15",
+                entityType: "quotation",
+                businessNumber: 15,
+                schemaVersion: 2,
+                revision: 2,
+                baseRevision: 1,
+                source: "legacy-localStorage",
+                deleted: false,
+                payload: { qno: 15, client: "New IndexedDB content", items: [] }
+              }] : []
+            }),
+            storage: oldStorage
+          });
+          const found = await isolated.findByBusinessNumber("quotation", 15);
+          const current = found.records.find(record => record.recordId === "legacy:quotation:15");
+          assert(current?.payload.client === "New IndexedDB content", "Older projection replaced the newer IndexedDB revision");
+          assert(found.records.length === 2 && found.conflicts.length === 1, "Ambiguous old projection was silently merged");
+        });
+
+        await test("corrupt backups are rejected without writes", async () => {
+          let error;
+          try{ await repository.inspectBackup("{broken"); }catch(caught){ error = caught; }
+          assert(error?.code === "CORRUPT_BACKUP", "Corrupt JSON was not categorized");
+        });
+
+        await test("cloud hydration projection cannot hide IndexedDB-only records", async () => {
+          state.storage.setItem("gst_quotes_history", JSON.stringify([
+            { qno: 99, client: "Simulated cloud hydration", savedAt: 999, items: [] }
+          ]));
+          const history = await repository.listHistory("quotation");
+          assert(history.records.some(record => record.recordId === "quotation:future:4"), "Cloud projection hid pending IndexedDB data");
+          assert(history.records.some(record => record.businessNumber === 99), "Hydrated local projection was not visible");
+        });
+
+        await test("legacy-only history works when IndexedDB is unavailable", async () => {
+          const fallback = repository.createTestRepository({
+            persistence: mockPersistence({
+              listDocuments: async () => { const error = new Error("Unavailable"); error.code = "INDEXEDDB_UNAVAILABLE"; throw error; },
+              getNumberHighWater: async () => { const error = new Error("Unavailable"); error.code = "INDEXEDDB_UNAVAILABLE"; throw error; }
+            }),
+            storage: state.storage
+          });
+          const history = await fallback.listHistory("quotation");
+          assert(history.records.some(record => record.businessNumber === 99), "Legacy fallback record missing");
+          assert(!history.complete, "Partial history was incorrectly called complete");
+          assert(history.issues.some(issue => issue.code === "INDEXEDDB_UNAVAILABLE"), "Unavailable IndexedDB was not exposed");
+        });
+
+        await test("incomplete migration is explicit", async () => {
+          const incomplete = repository.createTestRepository({
+            persistence: mockPersistence({
+              listDocuments: async () => { const error = new Error("Migration incomplete"); error.code = "MIGRATION_INCOMPLETE"; throw error; }
+            }),
+            storage: state.storage
+          });
+          const history = await incomplete.listHistory("quotation");
+          assert(!history.complete, "Incomplete migration was treated as complete");
+          assert(history.issues.some(issue => issue.code === "MIGRATION_INCOMPLETE"), "Migration error category was lost");
+        });
+
+        await test("localStorage failure preserves IndexedDB reads", async () => {
+          const failingStorage = { getItem: () => { throw new Error("Storage denied"); } };
+          const isolated = repository.createTestRepository({
+            persistence: mockPersistence({
+              listDocuments: async entityType => entityType === "quotation" ? [{
+                recordId: "quotation:isolated:10",
+                entityType: "quotation",
+                businessNumber: 10,
+                schemaVersion: 2,
+                revision: 3,
+                baseRevision: 2,
+                deleted: false,
+                payload: { qno: 10, client: "IDB survives" }
+              }] : []
+            }),
+            storage: failingStorage
+          });
+          const history = await isolated.listHistory("quotation");
+          assert(history.records[0]?.recordId === "quotation:isolated:10", "IndexedDB record was lost after localStorage failure");
+          assert(!history.complete, "Partial result was incorrectly called complete");
+          assert(history.issues.some(issue => issue.code === "LOCAL_STORAGE_UNAVAILABLE"), "Storage failure was not exposed");
+        });
+
+        await test("offline repository reads make no network calls", async () => {
+          await repository.listHistory("quotation");
+          await repository.getNextNumberFloor("purchaseOrder");
+          assert(state.networkCalls === 0, `Repository made ${state.networkCalls} network calls`);
+        });
+
+        output.textContent = `PASS (${results.length})\n${results.join("\n")}`;
+        document.title = `Repository v2: PASS (${results.length})`;
+      }catch(error){
+        console.error(error);
+        output.textContent = `FAIL after ${results.length} tests\n${error.stack || error}`;
+        document.title = "Repository v2: FAIL";
+      }finally{
+        await persistence.closeDisposableDatabase();
+        if(state.databaseName.startsWith("vstd-gst-calculator-test-")){
+          indexedDB.deleteDatabase(state.databaseName);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
