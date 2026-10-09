@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Persistence v2 browser tests</title>
+  <script>
+    (function () {
+      const initialEntries = {
+        gst_quotes_history: JSON.stringify([{
+          qno: 1,
+          date: "2026-01-01",
+          client: "Legacy Customer",
+          items: [{ name: "Legacy Item", qty: "1", rate: "10" }],
+          savedAt: 100
+        }]),
+        gst_purchase_orders_history: JSON.stringify([{
+          qno: 1,
+          date: "2026-01-02",
+          client: "Legacy Supplier",
+          items: [{ name: "Legacy Material", qty: "2" }],
+          savedAt: 101
+        }]),
+        gst_last_qno: "1",
+        gst_last_pono: "1"
+      };
+      const values = new Map(Object.entries(initialEntries));
+      const storage = {
+        writes: 0,
+        getItem(key) { return values.has(key) ? values.get(key) : null; },
+        setItem(key, value) { this.writes += 1; values.set(key, String(value)); },
+        removeItem(key) { this.writes += 1; values.delete(key); },
+        snapshot() { return Object.fromEntries(values); }
+      };
+      const hooks = {};
+      const databaseName = `vstd-gst-calculator-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      window.__persistenceTestState = {
+        databaseName,
+        storage,
+        hooks,
+        initialEntries,
+        networkCalls: 0
+      };
+      const originalFetch = window.fetch;
+      window.fetch = function () {
+        window.__persistenceTestState.networkCalls += 1;
+        return originalFetch.apply(this, arguments);
+      };
+      window.__VSTD_PERSISTENCE_V2_TEST_CONFIG__ = {
+        enabled: true,
+        databaseName,
+        storage,
+        hooks
+      };
+    })();
+  </script>
+  <script src="../persistence-v2.js"></script>
+</head>
+<body>
+  <output id="result">RUNNING</output>
+  <pre id="details"></pre>
+  <script>
+    window.addEventListener("load", async () => {
+      const resultNode = document.getElementById("result");
+      const detailsNode = document.getElementById("details");
+      const state = window.__persistenceTestState;
+      const api = window.vstdPersistenceV2;
+      const passed = [];
+      const failures = [];
+
+      function assert(condition, message) {
+        if(!condition) throw new Error(message);
+      }
+
+      async function test(name, callback) {
+        try {
+          await callback();
+          passed.push(name);
+        } catch(error) {
+          failures.push(`${name}: ${error?.stack || error}`);
+        } finally {
+          state.hooks.beforeStoreWrite = null;
+          state.hooks.afterWrites = null;
+          state.hooks.onTransactionCreated = null;
+          state.hooks.forceMigrationIncomplete = false;
+          state.hooks.forceIndexedDBUnavailable = false;
+          state.hooks.forceVersionMismatch = false;
+        }
+      }
+
+      async function expectCode(promise, code) {
+        try {
+          await promise;
+        } catch(error) {
+          assert(error?.code === code, `Expected ${code}, received ${error?.code || error}`);
+          return error;
+        }
+        throw new Error(`Expected rejection ${code}`);
+      }
+
+      function createOptions(overrides = {}) {
+        return {
+          mode: "create",
+          recordId: "test:quotation:100",
+          entityType: "quotation",
+          businessNumber: 100,
+          payload: { qno: 100, client: "Atomic Customer", items: [{ name: "Item", qty: "2", rate: "5" }] },
+          createdAt: 1000,
+          updatedAt: 1000,
+          ...overrides
+        };
+      }
+
+      const ready = await api.ready;
+      await test("disposable database readiness", async () => {
+        assert(ready.ok === true, `Persistence did not initialize: ${ready.error || "unknown"}`);
+        assert(api.databaseName.startsWith("vstd-gst-calculator-test-"), "Production database name was used");
+        assert(api.databaseVersion === 1, "Physical database version changed");
+      });
+
+      await test("existing legacy documents unchanged", async () => {
+        const quote = await api.getDocument("legacy:quotation:1");
+        const po = await api.getDocument("legacy:po:1");
+        assert(quote.revision === 1 && quote.payload.client === "Legacy Customer", "Legacy quotation changed");
+        assert(po.revision === 1 && po.payload.client === "Legacy Supplier", "Legacy PO changed");
+      });
+
+      let createResult;
+      await test("successful atomic quotation create and completion ordering", async () => {
+        let completionObserved = false;
+        state.hooks.onTransactionCreated = transaction => {
+          transaction.addEventListener("complete", () => { completionObserved = true; });
+        };
+        createResult = await api.commitDocumentWithOutbox(createOptions());
+        assert(completionObserved, "Commit resolved before transaction completion");
+        assert(createResult.committed && !createResult.idempotent, "Create result is incorrect");
+        assert(createResult.document.revision === 1 && createResult.document.baseRevision === 0, "Create revision is incorrect");
+        assert(createResult.operation.status === "pending", "Outbox operation is not pending");
+        assert(createResult.highWater === 100, "Quotation high-water was not advanced");
+      });
+
+      await test("atomic create persisted document and outbox", async () => {
+        const document = await api.getDocument("test:quotation:100");
+        const pending = await api.listPendingOperations();
+        assert(document?.businessNumber === 100, "Document was not persisted");
+        assert(pending.some(operation => operation.operationId === "test:quotation:100:1:upsert"), "Outbox operation was not persisted");
+      });
+
+      await test("identical create retry is idempotent", async () => {
+        const retry = await api.commitDocumentWithOutbox(createOptions());
+        assert(retry.idempotent === true && retry.committed === false, "Identical retry was not idempotent");
+        const pending = await api.listPendingOperations();
+        assert(pending.filter(operation => operation.operationId === retry.operation.operationId).length === 1, "Retry duplicated the operation");
+      });
+
+      await test("duplicate record rejection", async () => {
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          payload: { qno: 100, client: "Conflicting duplicate", items: [] },
+          updatedAt: 1001
+        })), "DUPLICATE_RECORD");
+      });
+
+      let updateResult;
+      await test("successful atomic update", async () => {
+        updateResult = await api.commitDocumentWithOutbox({
+          mode: "update",
+          recordId: "test:quotation:100",
+          entityType: "quotation",
+          businessNumber: 100,
+          expectedRevision: 1,
+          payload: { qno: 100, client: "Updated Customer", items: [{ name: "Item", qty: "3", rate: "5" }] },
+          updatedAt: 2000
+        });
+        assert(updateResult.document.revision === 2 && updateResult.document.baseRevision === 1, "Revision did not increment");
+        assert(updateResult.document.createdAt === 1000, "createdAt was not preserved");
+        assert(updateResult.document.createdOnDevice === createResult.document.createdOnDevice, "createdOnDevice was not preserved");
+      });
+
+      await test("identical update retry is idempotent", async () => {
+        const retry = await api.commitDocumentWithOutbox({
+          mode: "update",
+          recordId: "test:quotation:100",
+          entityType: "quotation",
+          businessNumber: 100,
+          expectedRevision: 1,
+          payload: { qno: 100, client: "Updated Customer", items: [{ name: "Item", qty: "3", rate: "5" }] },
+          updatedAt: 2000
+        });
+        assert(retry.idempotent === true && retry.document.revision === 2, "Update retry was not idempotent");
+      });
+
+      await test("stale revision rejection", async () => {
+        await expectCode(api.commitDocumentWithOutbox({
+          mode: "update",
+          recordId: "test:quotation:100",
+          entityType: "quotation",
+          businessNumber: 100,
+          expectedRevision: 1,
+          payload: { qno: 100, client: "Stale edit", items: [] },
+          updatedAt: 2001
+        }), "STALE_REVISION");
+      });
+
+      await test("local business-number conflict", async () => {
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          recordId: "test:quotation:duplicate-number",
+          updatedAt: 2100
+        })), "BUSINESS_NUMBER_CONFLICT");
+      });
+
+      await test("purchase order create and entity query", async () => {
+        const created = await api.commitDocumentWithOutbox(createOptions({
+          recordId: "test:po:300",
+          entityType: "purchaseOrder",
+          businessNumber: 300,
+          payload: { qno: 300, client: "Atomic Supplier", items: [{ name: "Material", qty: "4" }] },
+          createdAt: 3000,
+          updatedAt: 3000
+        }));
+        assert(created.document.entityType === "purchaseOrder" && created.highWater === 300, "PO create failed");
+        const documents = await api.listDocuments("purchaseOrder");
+        assert(documents.some(document => document.recordId === "test:po:300"), "PO list query failed");
+        const byNumber = await api.findDocumentsByBusinessNumber("purchaseOrder", 300);
+        assert(byNumber.length === 1 && byNumber[0].recordId === "test:po:300", "PO number query failed");
+      });
+
+      await test("monotonic high-water metadata", async () => {
+        const result = await api.commitDocumentWithOutbox(createOptions({
+          recordId: "test:quotation:50",
+          businessNumber: 50,
+          payload: { qno: 50, client: "Lower Number", items: [] },
+          createdAt: 3100,
+          updatedAt: 3100
+        }));
+        assert(result.highWater === 100, "High-water value decreased");
+      });
+
+      await test("concurrent commits serialize business-number conflicts", async () => {
+        const attempts = await Promise.allSettled([
+          api.commitDocumentWithOutbox(createOptions({ recordId: "test:quotation:200:a", businessNumber: 200, payload: { qno: 200, client: "A" }, updatedAt: 3200 })),
+          api.commitDocumentWithOutbox(createOptions({ recordId: "test:quotation:200:b", businessNumber: 200, payload: { qno: 200, client: "B" }, updatedAt: 3201 }))
+        ]);
+        assert(attempts.filter(item => item.status === "fulfilled").length === 1, "Concurrent creates did not produce exactly one success");
+        const rejected = attempts.find(item => item.status === "rejected");
+        assert(rejected?.reason?.code === "BUSINESS_NUMBER_CONFLICT", "Concurrent conflict category is incorrect");
+        assert((await api.findDocumentsByBusinessNumber("quotation", 200)).length === 1, "Concurrent commit created duplicate numbers");
+      });
+
+      await test("conflicting operation ID rejection", async () => {
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          recordId: "test:po:operation-conflict",
+          entityType: "purchaseOrder",
+          businessNumber: 301,
+          operationId: "test:quotation:100:1:upsert",
+          payload: { qno: 301, client: "Conflict" },
+          updatedAt: 3300
+        })), "OPERATION_CONFLICT");
+      });
+
+      async function assertAtomicFailure(storeName, code, number) {
+        const recordId = `test:quotation:failure:${storeName}`;
+        state.hooks.beforeStoreWrite = name => {
+          if(name === storeName) throw new Error(`Injected ${storeName} failure`);
+        };
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          recordId,
+          businessNumber: number,
+          payload: { qno: number, client: "Must Roll Back" },
+          updatedAt: 4000 + number
+        })), code);
+        state.hooks.beforeStoreWrite = null;
+        assert(await api.getDocument(recordId) === null, `${storeName} failure left a partial document`);
+        assert(!(await api.listPendingOperations()).some(operation => operation.recordId === recordId), `${storeName} failure left a partial outbox operation`);
+      }
+
+      await test("document write failure is atomic", () => assertAtomicFailure("documents", "DOCUMENT_WRITE_FAILED", 401));
+      await test("outbox write failure is atomic", () => assertAtomicFailure("outbox", "OUTBOX_WRITE_FAILED", 402));
+      await test("metadata write failure is atomic", () => assertAtomicFailure("meta", "METADATA_WRITE_FAILED", 403));
+
+      await test("transaction abort is atomic", async () => {
+        const recordId = "test:quotation:forced-abort";
+        state.hooks.afterWrites = () => { throw new Error("Injected transaction abort"); };
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          recordId,
+          businessNumber: 404,
+          payload: { qno: 404, client: "Forced Abort" },
+          updatedAt: 4404
+        })), "TRANSACTION_ABORTED");
+        state.hooks.afterWrites = null;
+        assert(await api.getDocument(recordId) === null, "Aborted transaction retained its document");
+      });
+
+      await test("quota failure category and rollback", async () => {
+        const recordId = "test:quotation:quota";
+        state.hooks.beforeStoreWrite = name => {
+          if(name === "outbox") throw new DOMException("Injected quota limit", "QuotaExceededError");
+        };
+        await expectCode(api.commitDocumentWithOutbox(createOptions({
+          recordId,
+          businessNumber: 405,
+          payload: { qno: 405, client: "Quota" },
+          updatedAt: 4405
+        })), "QUOTA_EXCEEDED");
+        state.hooks.beforeStoreWrite = null;
+        assert(await api.getDocument(recordId) === null, "Quota failure retained a partial document");
+      });
+
+      await test("pending operation listing and retry metadata", async () => {
+        const operationId = updateResult.operation.operationId;
+        const attempted = await api.markOperationAttempt(operationId, { attemptedAt: 5000, nextAttemptAt: 6000 });
+        assert(attempted.attempts === 1 && attempted.lastAttemptAt === 5000 && attempted.nextAttemptAt === 6000, "Attempt metadata is incorrect");
+        const failed = await api.markOperationFailed(operationId, new Error("offline"), { failedAt: 5100, nextAttemptAt: 7000 });
+        assert(failed.status === "failed" && failed.lastError === "offline", "Failure metadata is incorrect");
+        assert((await api.listPendingOperations()).some(operation => operation.operationId === operationId), "Failed operation disappeared from pending work");
+      });
+
+      await test("operation acknowledgement", async () => {
+        const operationId = updateResult.operation.operationId;
+        const completed = await api.markOperationComplete(operationId, { completedAt: 8000 });
+        assert(completed.status === "complete" && completed.completedAt === 8000, "Completion metadata is incorrect");
+        assert(!(await api.listPendingOperations()).some(operation => operation.operationId === operationId), "Completed operation remained pending");
+      });
+
+      await test("migration readiness failure", async () => {
+        state.hooks.forceMigrationIncomplete = true;
+        await expectCode(api.commitDocumentWithOutbox(createOptions({ recordId: "test:not-ready", businessNumber: 501 })), "MIGRATION_INCOMPLETE");
+      });
+
+      await test("IndexedDB unavailable failure", async () => {
+        state.hooks.forceIndexedDBUnavailable = true;
+        await expectCode(api.getDocument("test:any"), "INDEXEDDB_UNAVAILABLE");
+      });
+
+      await test("database version mismatch failure", async () => {
+        state.hooks.forceVersionMismatch = true;
+        await expectCode(api.getDocument("test:any"), "DATABASE_VERSION_MISMATCH");
+      });
+
+      await test("input validation categories", async () => {
+        await expectCode(api.commitDocumentWithOutbox(createOptions({ entityType: "invoice" })), "INVALID_ENTITY_TYPE");
+        await expectCode(api.commitDocumentWithOutbox(createOptions({ businessNumber: 0 })), "INVALID_BUSINESS_NUMBER");
+      });
+
+      await test("legacy storage and network remained untouched", async () => {
+        assert(state.storage.writes === 0, `Test storage was mutated ${state.storage.writes} times`);
+        assert(JSON.stringify(state.storage.snapshot()) === JSON.stringify(state.initialEntries), "Legacy source snapshot changed");
+        assert(state.networkCalls === 0, `Persistence made ${state.networkCalls} network calls`);
+      });
+
+      await test("legacy documents remain unchanged after commits", async () => {
+        const quote = await api.getDocument("legacy:quotation:1");
+        const po = await api.getDocument("legacy:po:1");
+        assert(quote.revision === 1 && quote.recordId === "legacy:quotation:1", "Legacy quotation wrapper changed");
+        assert(po.revision === 1 && po.recordId === "legacy:po:1", "Legacy PO wrapper changed");
+      });
+
+      resultNode.textContent = failures.length ? `FAIL (${failures.length}/${passed.length + failures.length})` : `PASS (${passed.length})`;
+      resultNode.dataset.status = failures.length ? "fail" : "pass";
+      detailsNode.textContent = failures.length ? failures.join("\n\n") : passed.join("\n");
+      document.title = `Persistence v2: ${resultNode.textContent}`;
+
+      await api.closeDisposableDatabase();
+      if(state.databaseName.startsWith("vstd-gst-calculator-test-")){
+        window.indexedDB.deleteDatabase(state.databaseName);
+      }
+    });
+  </script>
+</body>
+</html>

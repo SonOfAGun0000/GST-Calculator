@@ -1,7 +1,14 @@
 (function(){
   "use strict";
 
-  const DB_NAME = "vstd-gst-calculator";
+  const PRODUCTION_DB_NAME = "vstd-gst-calculator";
+  const testConfig = window.__VSTD_PERSISTENCE_V2_TEST_CONFIG__;
+  const isTestMode = Boolean(testConfig?.enabled);
+  if(isTestMode && !String(testConfig.databaseName || "").startsWith("vstd-gst-calculator-test-")){
+    throw new Error("Persistence tests require a disposable test database name");
+  }
+
+  const DB_NAME = isTestMode ? testConfig.databaseName : PRODUCTION_DB_NAME;
   const DB_VERSION = 1;
   const SCHEMA_VERSION = 2;
   const MIGRATION_ID = "legacy-documents-to-v2";
@@ -18,6 +25,33 @@
       recordIdPrefix: "legacy:po"
     }
   ];
+  const ENTITY_TYPES = new Set(["quotation", "purchaseOrder"]);
+  const storage = isTestMode && testConfig.storage ? testConfig.storage : window.localStorage;
+  const testHooks = isTestMode ? (testConfig.hooks || {}) : {};
+  let databasePromise = null;
+
+  class PersistenceError extends Error {
+    constructor(code, message, options = {}){
+      super(message);
+      this.name = "PersistenceError";
+      this.code = code;
+      if(options.cause) this.cause = options.cause;
+      if(options.details) this.details = options.details;
+    }
+  }
+
+  function persistenceError(error, fallbackCode, fallbackMessage, details){
+    if(error instanceof PersistenceError) return error;
+    const name = error?.name || "";
+    let code = fallbackCode;
+    if(name === "QuotaExceededError") code = "QUOTA_EXCEEDED";
+    if(name === "VersionError") code = "DATABASE_VERSION_MISMATCH";
+    return new PersistenceError(
+      code,
+      error?.message || fallbackMessage,
+      { cause: error, details }
+    );
+  }
 
   function requestResult(request){
     return new Promise((resolve, reject) => {
@@ -35,8 +69,15 @@
   }
 
   function openDatabase(){
+    if(!window.indexedDB){
+      return Promise.reject(new PersistenceError(
+        "INDEXEDDB_UNAVAILABLE",
+        "IndexedDB is unavailable in this browser context"
+      ));
+    }
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled = false;
+      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onupgradeneeded = () => {
         const database = request.result;
@@ -54,10 +95,38 @@
         outbox.createIndex("createdAt", "createdAt", { unique: false });
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error("IndexedDB upgrade is blocked by another open page"));
+      request.onsuccess = () => {
+        if(settled){
+          request.result.close();
+          return;
+        }
+        settled = true;
+        request.result.onversionchange = () => request.result.close();
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        if(settled) return;
+        settled = true;
+        reject(persistenceError(
+          request.error,
+          "DATABASE_OPEN_FAILED",
+          "Could not open the persistence database"
+        ));
+      };
+      request.onblocked = () => {
+        if(settled) return;
+        settled = true;
+        reject(new PersistenceError(
+          "DATABASE_BLOCKED",
+          "IndexedDB upgrade is blocked by another open page"
+        ));
+      };
     });
+  }
+
+  function getDatabaseConnection(){
+    if(!databasePromise) databasePromise = openDatabase();
+    return databasePromise;
   }
 
   function createDeviceId(){
@@ -149,7 +218,7 @@
   }
 
   function readSource(source){
-    const raw = localStorage.getItem(source.localStorageKey);
+    const raw = storage.getItem(source.localStorageKey);
     const preservedRaw = raw === null ? null : raw;
     if(raw === null){
       return { ...source, raw: preservedRaw, records: [] };
@@ -242,10 +311,10 @@
       }));
 
     const sourceUnchanged = sourceSnapshots.every(snapshot =>
-      localStorage.getItem(snapshot.localStorageKey) === snapshot.raw
+      storage.getItem(snapshot.localStorageKey) === snapshot.raw
     );
     const highWaterUnchanged = highWaterSnapshots.every(snapshot =>
-      localStorage.getItem(snapshot.key) === snapshot.value
+      storage.getItem(snapshot.key) === snapshot.value
     );
     const quotation = sourcePlans.find(plan => plan.entityType === "quotation");
     const purchaseOrder = sourcePlans.find(plan => plan.entityType === "purchaseOrder");
@@ -286,7 +355,7 @@
     try{
       const highWaterSnapshots = ["gst_last_qno", "gst_last_pono"].map(key => ({
         key,
-        value: localStorage.getItem(key)
+        value: storage.getItem(key)
       }));
       const sources = SOURCES.map(readSource);
       const sourceChecksums = {};
@@ -343,10 +412,598 @@
     }
   }
 
+  function validateEntityType(entityType){
+    if(!ENTITY_TYPES.has(entityType)){
+      throw new PersistenceError(
+        "INVALID_ENTITY_TYPE",
+        `Unsupported document entity type: ${entityType}`
+      );
+    }
+    return entityType;
+  }
+
+  function validateBusinessNumber(value){
+    const number = Number(value);
+    if(!Number.isSafeInteger(number) || number <= 0){
+      throw new PersistenceError(
+        "INVALID_BUSINESS_NUMBER",
+        "Business number must be a positive safe integer"
+      );
+    }
+    return number;
+  }
+
+  function validateRecordId(value){
+    const recordId = String(value || "").trim();
+    if(!recordId || recordId.length > 240){
+      throw new PersistenceError(
+        "INVALID_RECORD_ID",
+        "recordId must be a non-empty string no longer than 240 characters"
+      );
+    }
+    return recordId;
+  }
+
+  function createRecordId(entityType){
+    return `document:${entityType}:${createDeviceId()}`;
+  }
+
+  function validatePayload(payload){
+    if(!payload || typeof payload !== "object" || Array.isArray(payload)){
+      throw new PersistenceError("INVALID_PAYLOAD", "Document payload must be an object");
+    }
+    return payload;
+  }
+
+  function validateTimestamp(value, fallback){
+    if(value === undefined || value === null) return fallback;
+    const timestamp = Number(value);
+    if(!Number.isFinite(timestamp) || timestamp < 0){
+      throw new PersistenceError("INVALID_TIMESTAMP", "Timestamp must be a non-negative finite number");
+    }
+    return timestamp;
+  }
+
+  function operationMatches(existing, intended){
+    if(!existing) return false;
+    return existing.operationId === intended.operationId &&
+      existing.recordId === intended.recordId &&
+      existing.entityType === intended.entityType &&
+      Number(existing.businessNumber) === Number(intended.businessNumber) &&
+      existing.operation === intended.operation &&
+      Number(existing.revision) === Number(intended.revision) &&
+      Number(existing.baseRevision) === Number(intended.baseRevision) &&
+      existing.deviceId === intended.deviceId;
+  }
+
+  function documentMatchesIntent(existing, intended){
+    if(!existing) return false;
+    return existing.recordId === intended.recordId &&
+      existing.entityType === intended.entityType &&
+      Number(existing.businessNumber) === Number(intended.businessNumber) &&
+      Number(existing.revision) === Number(intended.revision) &&
+      Number(existing.baseRevision) === Number(intended.baseRevision) &&
+      Boolean(existing.deleted) === Boolean(intended.deleted) &&
+      stableStringify(existing.payload) === stableStringify(intended.payload);
+  }
+
+  async function requireReady(){
+    if(testHooks.forceIndexedDBUnavailable){
+      throw new PersistenceError("INDEXEDDB_UNAVAILABLE", "IndexedDB is unavailable in this browser context");
+    }
+    if(testHooks.forceMigrationIncomplete){
+      throw new PersistenceError("MIGRATION_INCOMPLETE", "The legacy copy migration has not completed successfully");
+    }
+    if(testHooks.forceVersionMismatch){
+      throw new PersistenceError("DATABASE_VERSION_MISMATCH", "The IndexedDB version is incompatible");
+    }
+    const state = await ready;
+    if(!state?.ok){
+      const migrationIncomplete = state?.migration && state.migration.status !== "complete";
+      throw new PersistenceError(
+        migrationIncomplete ? "MIGRATION_INCOMPLETE" : (state?.errorCode || "PERSISTENCE_NOT_READY"),
+        migrationIncomplete
+          ? "The legacy copy migration has not completed successfully"
+          : (state?.error || "IndexedDB persistence is not ready"),
+        { details: state }
+      );
+    }
+    return {
+      database: await getDatabaseConnection(),
+      deviceId: state.deviceId,
+      state
+    };
+  }
+
+  function invokeWriteHook(storeName, value){
+    if(typeof testHooks.beforeStoreWrite === "function"){
+      testHooks.beforeStoreWrite(storeName, value);
+    }
+  }
+
+  async function commitDocumentWithOutbox(options = {}){
+    const mode = options.mode || (options.expectedRevision === undefined ? "create" : "update");
+    if(mode !== "create" && mode !== "update"){
+      throw new PersistenceError("INVALID_OPTIONS", "Commit mode must be create or update");
+    }
+
+    const entityType = validateEntityType(options.entityType);
+    const businessNumber = validateBusinessNumber(options.businessNumber);
+    const payload = validatePayload(options.payload);
+    const recordId = validateRecordId(options.recordId || createRecordId(entityType));
+    const expectedRevision = mode === "update" ? Number(options.expectedRevision) : 0;
+    if(mode === "update" && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)){
+      throw new PersistenceError(
+        "INVALID_REVISION",
+        "Updates require a positive expectedRevision"
+      );
+    }
+
+    const now = Date.now();
+    const updatedAt = validateTimestamp(options.updatedAt, now);
+    const deleted = Boolean(options.deleted);
+    const operation = deleted ? "delete" : "upsert";
+    const { database, deviceId } = await requireReady();
+
+    return new Promise((resolve, reject) => {
+      let failure = null;
+      let outcome = null;
+      const transaction = database.transaction(["documents", "outbox", "meta"], "readwrite");
+      if(typeof testHooks.onTransactionCreated === "function"){
+        testHooks.onTransactionCreated(transaction);
+      }
+      const documents = transaction.objectStore("documents");
+      const outbox = transaction.objectStore("outbox");
+      const meta = transaction.objectStore("meta");
+      const currentRequest = documents.get(recordId);
+      const conflictsRequest = documents.index("businessNumber").getAll(businessNumber);
+      const numberMetaKey = `number:${entityType}`;
+      const numberRequest = meta.get(numberMetaKey);
+      let currentResult;
+      let conflictResults;
+      let numberResult;
+      let completedReads = 0;
+
+      function fail(error){
+        if(failure) return;
+        failure = error instanceof PersistenceError
+          ? error
+          : persistenceError(error, "TRANSACTION_ABORTED", "Document transaction failed");
+        try{
+          transaction.abort();
+        }catch{}
+      }
+
+      function readFailed(request, category, message){
+        if(!failure) failure = persistenceError(request.error, category, message);
+      }
+
+      function writeFailed(request, category, message, storeName){
+        if(!failure) failure = persistenceError(request.error, category, message, { storeName });
+      }
+
+      function stageWrites(document, pendingOperation, highWater, currentNumberMeta){
+        try{
+          invokeWriteHook("documents", document);
+        }catch(error){
+          fail(persistenceError(error, "DOCUMENT_WRITE_FAILED", "Could not stage the document write"));
+          return;
+        }
+
+        let documentWrite;
+        try{
+          documentWrite = mode === "create" ? documents.add(document) : documents.put(document);
+          documentWrite.onerror = () => writeFailed(
+            documentWrite,
+            "DOCUMENT_WRITE_FAILED",
+            "Could not write the document",
+            "documents"
+          );
+        }catch(error){
+          fail(persistenceError(error, "DOCUMENT_WRITE_FAILED", "Could not write the document"));
+          return;
+        }
+
+        try{
+          invokeWriteHook("outbox", pendingOperation);
+        }catch(error){
+          fail(persistenceError(error, "OUTBOX_WRITE_FAILED", "Could not stage the pending operation"));
+          return;
+        }
+
+        let outboxWrite;
+        try{
+          outboxWrite = outbox.add(pendingOperation);
+          outboxWrite.onerror = () => writeFailed(
+            outboxWrite,
+            "OUTBOX_WRITE_FAILED",
+            "Could not write the pending operation",
+            "outbox"
+          );
+        }catch(error){
+          fail(persistenceError(error, "OUTBOX_WRITE_FAILED", "Could not write the pending operation"));
+          return;
+        }
+
+        const numberMeta = {
+          ...(currentNumberMeta || {}),
+          key: numberMetaKey,
+          value: highWater,
+          updatedAt
+        };
+        try{
+          invokeWriteHook("meta", numberMeta);
+        }catch(error){
+          fail(persistenceError(error, "METADATA_WRITE_FAILED", "Could not stage numbering metadata"));
+          return;
+        }
+
+        let metaWrite;
+        try{
+          metaWrite = meta.put(numberMeta);
+          metaWrite.onerror = () => writeFailed(
+            metaWrite,
+            "METADATA_WRITE_FAILED",
+            "Could not update numbering metadata",
+            "meta"
+          );
+        }catch(error){
+          fail(persistenceError(error, "METADATA_WRITE_FAILED", "Could not update numbering metadata"));
+          return;
+        }
+
+        try{
+          outcome = {
+            ok: true,
+            committed: true,
+            idempotent: false,
+            document,
+            operation: pendingOperation,
+            highWater
+          };
+          if(typeof testHooks.afterWrites === "function"){
+            testHooks.afterWrites(transaction);
+          }
+        }catch(error){
+          fail(persistenceError(
+            error,
+            "TRANSACTION_ABORTED",
+            "Could not stage the atomic document transaction"
+          ));
+        }
+      }
+
+      function prepareCommit(){
+        const current = currentResult || null;
+        const conflictingDocuments = (conflictResults || []).filter(document =>
+          document.recordId !== recordId &&
+          document.entityType === entityType
+        );
+        if(conflictingDocuments.length){
+          fail(new PersistenceError(
+            "BUSINESS_NUMBER_CONFLICT",
+            `${entityType} number ${businessNumber} already belongs to another local record`,
+            { details: { recordIds: conflictingDocuments.map(document => document.recordId) } }
+          ));
+          return;
+        }
+
+        let intendedDocument;
+        let normalWrite = true;
+        let duplicateCode = null;
+        if(mode === "create"){
+          intendedDocument = {
+            recordId,
+            entityType,
+            businessNumber,
+            schemaVersion: SCHEMA_VERSION,
+            revision: 1,
+            baseRevision: 0,
+            createdAt: validateTimestamp(options.createdAt, updatedAt),
+            updatedAt,
+            createdOnDevice: deviceId,
+            updatedOnDevice: deviceId,
+            deleted,
+            payload
+          };
+          if(current){
+            normalWrite = false;
+            duplicateCode = "DUPLICATE_RECORD";
+          }
+        }else{
+          if(!current){
+            fail(new PersistenceError("DOCUMENT_NOT_FOUND", `Document ${recordId} does not exist`));
+            return;
+          }
+          if(current.entityType !== entityType){
+            fail(new PersistenceError("INVALID_ENTITY_TYPE", "An update cannot change document entity type"));
+            return;
+          }
+          const targetRevision = expectedRevision + 1;
+          intendedDocument = {
+            ...current,
+            recordId,
+            entityType,
+            businessNumber,
+            schemaVersion: SCHEMA_VERSION,
+            revision: targetRevision,
+            baseRevision: expectedRevision,
+            createdAt: Number(current.createdAt) || 0,
+            updatedAt,
+            createdOnDevice: current.createdOnDevice || deviceId,
+            updatedOnDevice: deviceId,
+            deleted,
+            payload
+          };
+          if(Number(current.revision) !== expectedRevision){
+            normalWrite = false;
+            duplicateCode = "STALE_REVISION";
+          }
+        }
+
+        const operationId = validateRecordId(
+          options.operationId || `${recordId}:${intendedDocument.revision}:${operation}`
+        );
+        const pendingOperation = {
+          operationId,
+          recordId,
+          entityType,
+          businessNumber,
+          operation,
+          revision: intendedDocument.revision,
+          baseRevision: intendedDocument.baseRevision,
+          deviceId,
+          status: "pending",
+          attempts: 0,
+          createdAt: updatedAt,
+          nextAttemptAt: updatedAt,
+          lastAttemptAt: null,
+          lastError: null
+        };
+
+        const operationRequest = outbox.get(operationId);
+        operationRequest.onerror = () => {
+          readFailed(operationRequest, "OUTBOX_READ_FAILED", "Could not inspect the pending operation");
+        };
+        operationRequest.onsuccess = () => {
+          const existingOperation = operationRequest.result || null;
+          if(!normalWrite){
+            if(documentMatchesIntent(current, intendedDocument) &&
+              operationMatches(existingOperation, pendingOperation)){
+              outcome = {
+                ok: true,
+                committed: false,
+                idempotent: true,
+                document: current,
+                operation: existingOperation,
+                highWater: Math.max(Number(numberResult?.value) || 0, businessNumber)
+              };
+              return;
+            }
+            fail(new PersistenceError(
+              duplicateCode,
+              duplicateCode === "DUPLICATE_RECORD"
+                ? `Document ${recordId} already exists`
+                : `Document ${recordId} has changed since revision ${expectedRevision}`,
+              { details: { currentRevision: Number(current?.revision) || 0, expectedRevision } }
+            ));
+            return;
+          }
+
+          if(existingOperation){
+            fail(new PersistenceError(
+              "OPERATION_CONFLICT",
+              `Operation ${operationId} already exists with conflicting content`
+            ));
+            return;
+          }
+
+          const highWater = Math.max(Number(numberResult?.value) || 0, businessNumber);
+          stageWrites(intendedDocument, pendingOperation, highWater, numberResult);
+        };
+      }
+
+      function readCompleted(){
+        completedReads += 1;
+        if(completedReads === 3 && !failure) prepareCommit();
+      }
+
+      currentRequest.onsuccess = () => {
+        currentResult = currentRequest.result;
+        readCompleted();
+      };
+      currentRequest.onerror = () => readFailed(
+        currentRequest,
+        "DOCUMENT_READ_FAILED",
+        "Could not inspect the current document"
+      );
+      conflictsRequest.onsuccess = () => {
+        conflictResults = conflictsRequest.result;
+        readCompleted();
+      };
+      conflictsRequest.onerror = () => readFailed(
+        conflictsRequest,
+        "DOCUMENT_READ_FAILED",
+        "Could not inspect documents using this business number"
+      );
+      numberRequest.onsuccess = () => {
+        numberResult = numberRequest.result;
+        readCompleted();
+      };
+      numberRequest.onerror = () => readFailed(
+        numberRequest,
+        "METADATA_READ_FAILED",
+        "Could not inspect numbering metadata"
+      );
+
+      transaction.oncomplete = () => {
+        if(!outcome){
+          reject(new PersistenceError("TRANSACTION_ABORTED", "Transaction completed without a result"));
+          return;
+        }
+        resolve(outcome);
+      };
+      transaction.onerror = () => {
+        if(!failure){
+          failure = persistenceError(
+            transaction.error,
+            "TRANSACTION_ABORTED",
+            "Atomic document transaction failed"
+          );
+        }
+      };
+      transaction.onabort = () => reject(
+        failure || persistenceError(
+          transaction.error,
+          "TRANSACTION_ABORTED",
+          "Atomic document transaction was aborted"
+        )
+      );
+    });
+  }
+
+  async function getDocument(recordId){
+    const id = validateRecordId(recordId);
+    const { database } = await requireReady();
+    const transaction = database.transaction("documents", "readonly");
+    const done = transactionDone(transaction);
+    const result = await requestResult(transaction.objectStore("documents").get(id));
+    await done;
+    return result || null;
+  }
+
+  async function listDocuments(entityType, options = {}){
+    validateEntityType(entityType);
+    const { database } = await requireReady();
+    const transaction = database.transaction("documents", "readonly");
+    const done = transactionDone(transaction);
+    let results = await requestResult(
+      transaction.objectStore("documents").index("entityType").getAll(entityType)
+    );
+    await done;
+    if(!options.includeDeleted) results = results.filter(document => !document.deleted);
+    results.sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
+    if(options.order === "asc") results.reverse();
+    const limit = Number(options.limit);
+    if(Number.isSafeInteger(limit) && limit >= 0) results = results.slice(0, limit);
+    return results;
+  }
+
+  async function findDocumentsByBusinessNumber(entityType, businessNumber){
+    validateEntityType(entityType);
+    const number = validateBusinessNumber(businessNumber);
+    const { database } = await requireReady();
+    const transaction = database.transaction("documents", "readonly");
+    const done = transactionDone(transaction);
+    const results = await requestResult(
+      transaction.objectStore("documents").index("businessNumber").getAll(number)
+    );
+    await done;
+    return results.filter(document => document.entityType === entityType);
+  }
+
+  async function listPendingOperations(options = {}){
+    const { database } = await requireReady();
+    const transaction = database.transaction("outbox", "readonly");
+    const done = transactionDone(transaction);
+    let results = await requestResult(transaction.objectStore("outbox").getAll());
+    await done;
+    const statuses = Array.isArray(options.statuses)
+      ? new Set(options.statuses)
+      : new Set(["pending", "failed"]);
+    results = results.filter(operation => statuses.has(operation.status));
+    results.sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
+    const limit = Number(options.limit);
+    if(Number.isSafeInteger(limit) && limit >= 0) results = results.slice(0, limit);
+    return results;
+  }
+
+  async function updateOperation(operationId, updater){
+    const id = validateRecordId(operationId);
+    const { database } = await requireReady();
+    return new Promise((resolve, reject) => {
+      let failure = null;
+      let updatedOperation = null;
+      const transaction = database.transaction("outbox", "readwrite");
+      const store = transaction.objectStore("outbox");
+      const request = store.get(id);
+      request.onerror = () => {
+        failure = persistenceError(request.error, "OUTBOX_READ_FAILED", "Could not read the outbox operation");
+      };
+      request.onsuccess = () => {
+        if(!request.result){
+          failure = new PersistenceError("OPERATION_NOT_FOUND", `Operation ${id} does not exist`);
+          transaction.abort();
+          return;
+        }
+        try{
+          updatedOperation = updater({ ...request.result });
+          store.put(updatedOperation);
+        }catch(error){
+          failure = persistenceError(error, "OUTBOX_WRITE_FAILED", "Could not update the outbox operation");
+          transaction.abort();
+        }
+      };
+      transaction.oncomplete = () => resolve(updatedOperation);
+      transaction.onerror = () => {
+        if(!failure){
+          failure = persistenceError(transaction.error, "OUTBOX_WRITE_FAILED", "Could not update the outbox operation");
+        }
+      };
+      transaction.onabort = () => reject(failure || new PersistenceError(
+        "TRANSACTION_ABORTED",
+        "Outbox transaction was aborted"
+      ));
+    });
+  }
+
+  function markOperationAttempt(operationId, options = {}){
+    const attemptedAt = validateTimestamp(options.attemptedAt, Date.now());
+    const nextAttemptAt = validateTimestamp(options.nextAttemptAt, attemptedAt);
+    return updateOperation(operationId, operation => ({
+      ...operation,
+      status: "pending",
+      attempts: (Number(operation.attempts) || 0) + 1,
+      lastAttemptAt: attemptedAt,
+      nextAttemptAt
+    }));
+  }
+
+  function markOperationComplete(operationId, options = {}){
+    const completedAt = validateTimestamp(options.completedAt, Date.now());
+    return updateOperation(operationId, operation => ({
+      ...operation,
+      status: "complete",
+      completedAt,
+      lastError: null
+    }));
+  }
+
+  function markOperationFailed(operationId, error, options = {}){
+    const failedAt = validateTimestamp(options.failedAt, Date.now());
+    const nextAttemptAt = validateTimestamp(options.nextAttemptAt, failedAt);
+    return updateOperation(operationId, operation => ({
+      ...operation,
+      status: "failed",
+      failedAt,
+      nextAttemptAt,
+      lastError: error instanceof Error ? error.message : String(error || "Unknown synchronization error")
+    }));
+  }
+
   async function initialize(){
-    const database = await openDatabase();
+    const database = await getDatabaseConnection();
     const deviceId = await ensureFoundationMeta(database);
-    const migration = await runCopyOnlyMigration(database, deviceId);
+    let migration;
+    try{
+      migration = await runCopyOnlyMigration(database, deviceId);
+    }catch(error){
+      throw persistenceError(
+        error,
+        "MIGRATION_INCOMPLETE",
+        "The legacy copy migration did not complete"
+      );
+    }
     return { ok: migration.status === "complete", databaseName: DB_NAME, databaseVersion: DB_VERSION, schemaVersion: SCHEMA_VERSION, deviceId, migration };
   }
 
@@ -357,16 +1014,35 @@
       databaseName: DB_NAME,
       databaseVersion: DB_VERSION,
       schemaVersion: SCHEMA_VERSION,
+      errorCode: error?.code || "PERSISTENCE_INITIALIZATION_FAILED",
       error: error instanceof Error ? error.message : String(error)
     };
   });
 
-  window.vstdPersistenceV2 = Object.freeze({
+  const publicApi = {
     databaseName: DB_NAME,
     databaseVersion: DB_VERSION,
     schemaVersion: SCHEMA_VERSION,
     migrationId: MIGRATION_ID,
     ready,
-    getDiagnostics: () => ready
-  });
+    getDiagnostics: () => ready,
+    commitDocumentWithOutbox,
+    getDocument,
+    listDocuments,
+    findDocumentsByBusinessNumber,
+    listPendingOperations,
+    markOperationAttempt,
+    markOperationComplete,
+    markOperationFailed
+  };
+
+  if(isTestMode){
+    publicApi.closeDisposableDatabase = async () => {
+      const database = await databasePromise?.catch(() => null);
+      database?.close();
+      databasePromise = null;
+    };
+  }
+
+  window.vstdPersistenceV2 = Object.freeze(publicApi);
 })();
