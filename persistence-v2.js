@@ -473,7 +473,8 @@
       existing.operation === intended.operation &&
       Number(existing.revision) === Number(intended.revision) &&
       Number(existing.baseRevision) === Number(intended.baseRevision) &&
-      existing.deviceId === intended.deviceId;
+      existing.deviceId === intended.deviceId &&
+      (!existing.document || stableStringify(existing.document) === stableStringify(intended.document));
   }
 
   function documentMatchesIntent(existing, intended){
@@ -758,7 +759,8 @@
           createdAt: updatedAt,
           nextAttemptAt: updatedAt,
           lastAttemptAt: null,
-          lastError: null
+          lastError: null,
+          document: intendedDocument
         };
 
         const operationRequest = outbox.get(operationId);
@@ -931,6 +933,186 @@
     return results;
   }
 
+  function validateLeaseOwner(value){
+    const leaseOwner = String(value || "").trim();
+    if(!leaseOwner || leaseOwner.length > 240){
+      throw new PersistenceError(
+        "INVALID_LEASE_OWNER",
+        "leaseOwner must be a non-empty string no longer than 240 characters"
+      );
+    }
+    return leaseOwner;
+  }
+
+  function validatePositiveDuration(value, name){
+    const duration = Number(value);
+    if(!Number.isFinite(duration) || duration <= 0){
+      throw new PersistenceError("INVALID_OPTIONS", `${name} must be a positive finite number`);
+    }
+    return duration;
+  }
+
+  async function claimNextPendingOperation(options = {}){
+    const leaseOwner = validateLeaseOwner(options.leaseOwner);
+    const now = validateTimestamp(options.now, Date.now());
+    const leaseDurationMs = validatePositiveDuration(options.leaseDurationMs || 30000, "leaseDurationMs");
+    const { database } = await requireReady();
+    return new Promise((resolve, reject) => {
+      let failure = null;
+      let claimedOperation = null;
+      const transaction = database.transaction("outbox", "readwrite");
+      const store = transaction.objectStore("outbox");
+      const request = store.getAll();
+      request.onerror = () => {
+        failure = persistenceError(request.error, "OUTBOX_READ_FAILED", "Could not inspect pending operations");
+      };
+      request.onsuccess = () => {
+        try{
+          const operations = request.result || [];
+          const incomplete = operations.filter(operation => operation.status !== "complete");
+          const candidates = incomplete.filter(operation => {
+            const status = operation.status;
+            const leaseExpiresAt = Number(operation.leaseExpiresAt);
+            const expiredLease = status === "processing" &&
+              (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= now);
+            if(status !== "pending" && status !== "failed" && !expiredLease) return false;
+            if(Number(operation.nextAttemptAt) > now) return false;
+            const revision = Number(operation.revision);
+            return !incomplete.some(other =>
+              other.operationId !== operation.operationId &&
+              other.recordId === operation.recordId &&
+              Number(other.revision) < revision
+            );
+          });
+          candidates.sort((left, right) =>
+            Number(left.createdAt) - Number(right.createdAt) ||
+            Number(left.revision) - Number(right.revision) ||
+            String(left.operationId).localeCompare(String(right.operationId))
+          );
+          if(!candidates.length) return;
+          const selected = candidates[0];
+          claimedOperation = {
+            ...selected,
+            status: "processing",
+            attempts: (Number(selected.attempts) || 0) + 1,
+            lastAttemptAt: now,
+            leaseOwner,
+            leaseAcquiredAt: now,
+            leaseExpiresAt: now + leaseDurationMs
+          };
+          invokeWriteHook("outbox", claimedOperation);
+          store.put(claimedOperation);
+        }catch(error){
+          failure = persistenceError(error, "OUTBOX_WRITE_FAILED", "Could not claim a pending operation");
+          transaction.abort();
+        }
+      };
+      transaction.oncomplete = () => resolve(claimedOperation);
+      transaction.onerror = () => {
+        if(!failure){
+          failure = persistenceError(transaction.error, "OUTBOX_WRITE_FAILED", "Could not claim a pending operation");
+        }
+      };
+      transaction.onabort = () => reject(failure || new PersistenceError(
+        "TRANSACTION_ABORTED",
+        "Outbox claim transaction was aborted"
+      ));
+    });
+  }
+
+  function updateClaimedOperation(operationId, leaseOwner, updater){
+    const id = validateRecordId(operationId);
+    const owner = validateLeaseOwner(leaseOwner);
+    return requireReady().then(({ database }) => new Promise((resolve, reject) => {
+      let failure = null;
+      let updatedOperation = null;
+      const transaction = database.transaction("outbox", "readwrite");
+      const store = transaction.objectStore("outbox");
+      const request = store.get(id);
+      request.onerror = () => {
+        failure = persistenceError(request.error, "OUTBOX_READ_FAILED", "Could not read the claimed operation");
+      };
+      request.onsuccess = () => {
+        const current = request.result;
+        if(!current){
+          failure = new PersistenceError("OPERATION_NOT_FOUND", `Operation ${id} does not exist`);
+          transaction.abort();
+          return;
+        }
+        if(current.status !== "processing" || current.leaseOwner !== owner){
+          failure = new PersistenceError(
+            "LEASE_LOST",
+            `Operation ${id} is not leased by ${owner}`,
+            { details: { status: current.status, leaseOwner: current.leaseOwner || null } }
+          );
+          transaction.abort();
+          return;
+        }
+        try{
+          updatedOperation = updater({ ...current });
+          invokeWriteHook("outbox", updatedOperation);
+          store.put(updatedOperation);
+        }catch(error){
+          failure = persistenceError(error, "OUTBOX_WRITE_FAILED", "Could not update the claimed operation");
+          transaction.abort();
+        }
+      };
+      transaction.oncomplete = () => resolve(updatedOperation);
+      transaction.onerror = () => {
+        if(!failure){
+          failure = persistenceError(transaction.error, "OUTBOX_WRITE_FAILED", "Could not update the claimed operation");
+        }
+      };
+      transaction.onabort = () => reject(failure || new PersistenceError(
+        "TRANSACTION_ABORTED",
+        "Claimed operation transaction was aborted"
+      ));
+    }));
+  }
+
+  function renewOperationLease(operationId, leaseOwner, options = {}){
+    const now = validateTimestamp(options.now, Date.now());
+    const leaseDurationMs = validatePositiveDuration(options.leaseDurationMs || 30000, "leaseDurationMs");
+    return updateClaimedOperation(operationId, leaseOwner, operation => ({
+      ...operation,
+      leaseExpiresAt: now + leaseDurationMs
+    }));
+  }
+
+  function settleClaimedOperation(operationId, leaseOwner, outcome = {}){
+    const settledAt = validateTimestamp(outcome.settledAt, Date.now());
+    const allowedStatuses = new Set(["complete", "failed", "conflict", "permanent"]);
+    if(!allowedStatuses.has(outcome.status)){
+      throw new PersistenceError("INVALID_OPTIONS", "Claim outcome status is invalid");
+    }
+    let nextAttemptAt = null;
+    if(outcome.status === "failed"){
+      nextAttemptAt = validateTimestamp(outcome.nextAttemptAt, settledAt);
+    }
+    return updateClaimedOperation(operationId, leaseOwner, operation => {
+      const updated = {
+        ...operation,
+        status: outcome.status,
+        settledAt,
+        lastError: outcome.error ? String(outcome.error) : null,
+        conflict: outcome.status === "conflict" ? (outcome.conflict || null) : null,
+        leaseOwner: null,
+        leaseAcquiredAt: null,
+        leaseExpiresAt: null
+      };
+      if(outcome.status === "complete"){
+        updated.completedAt = settledAt;
+        updated.remoteResult = outcome.remoteResult || null;
+      }
+      if(outcome.status === "failed"){
+        updated.failedAt = settledAt;
+        updated.nextAttemptAt = nextAttemptAt;
+      }
+      if(outcome.status === "permanent") updated.failedAt = settledAt;
+      return updated;
+    });
+  }
+
   async function updateOperation(operationId, updater){
     const id = validateRecordId(operationId);
     const { database } = await requireReady();
@@ -1045,6 +1227,9 @@
     findDocumentsByBusinessNumber,
     getNumberHighWater,
     listPendingOperations,
+    claimNextPendingOperation,
+    renewOperationLease,
+    settleClaimedOperation,
     markOperationAttempt,
     markOperationComplete,
     markOperationFailed

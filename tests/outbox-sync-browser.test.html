@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Outbox sync: RUNNING</title>
+</head>
+<body>
+  <pre id="result">RUNNING</pre>
+  <script>
+    (() => {
+      const values = new Map([
+        ["gst_quotes_history", "[]"],
+        ["gst_purchase_orders_history", "[]"]
+      ]);
+      const databaseName = `vstd-gst-calculator-test-outbox-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      window.__outboxTestState = {
+        databaseName,
+        corruptNextOutbox: false,
+        values,
+        storage: {
+          getItem: key => values.has(key) ? values.get(key) : null,
+          setItem: (key, value) => values.set(key, String(value)),
+          removeItem: key => values.delete(key)
+        },
+        networkCalls: 0
+      };
+      window.fetch = (...args) => {
+        window.__outboxTestState.networkCalls += 1;
+        return Promise.reject(new Error(`Unexpected network request: ${args[0]}`));
+      };
+      window.__VSTD_PERSISTENCE_V2_TEST_CONFIG__ = {
+        enabled: true,
+        databaseName,
+        storage: window.__outboxTestState.storage,
+        hooks: {
+          beforeStoreWrite(storeName, value){
+            const state = window.__outboxTestState;
+            if(storeName === "outbox" && value.status === "pending" && state.corruptNextOutbox){
+              delete value.document;
+              state.corruptNextOutbox = false;
+            }
+          }
+        }
+      };
+    })();
+  </script>
+  <script src="../persistence-v2.js"></script>
+  <script src="../outbox-sync.js"></script>
+  <script>
+    (async () => {
+      const output = document.getElementById("result");
+      const state = window.__outboxTestState;
+      const persistence = window.vstdPersistenceV2;
+      const sync = window.VstdOutboxSync;
+      const results = [];
+      let now = 10000;
+
+      function assert(condition, message){
+        if(!condition) throw new Error(message);
+      }
+
+      async function test(name, run){
+        await run();
+        results.push(name);
+      }
+
+      function stable(value){
+        if(value === null || typeof value !== "object") return JSON.stringify(value);
+        if(Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+        const keys = Object.keys(value).sort();
+        return `{${keys.map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+      }
+
+      function createMockCloud(){
+        const documents = new Map();
+        const numberIndex = new Map();
+        const behavior = new Map();
+        const writes = [];
+        const calls = [];
+        let releaseDeferred = null;
+        let deferredOperationId = null;
+
+        function numberKey(request){
+          return `${request.entityType}:${request.businessNumber}`;
+        }
+
+        async function applyOperation(request){
+          calls.push(request.operationId);
+          const mode = behavior.get(request.operationId);
+          if(mode?.type === "transient" && mode.remaining > 0){
+            mode.remaining -= 1;
+            const error = new Error("Temporary network failure");
+            error.code = "NETWORK_ERROR";
+            error.transient = true;
+            throw error;
+          }
+          if(mode?.type === "permanent"){
+            const error = new Error("Permanent authorization failure");
+            error.code = "PERMISSION_DENIED";
+            error.permanent = true;
+            throw error;
+          }
+          if(mode?.type === "deferred"){
+            deferredOperationId = request.operationId;
+            await new Promise(resolve => { releaseDeferred = resolve; });
+          }
+
+          const indexKey = numberKey(request);
+          const indexedRecordId = numberIndex.get(indexKey);
+          if(indexedRecordId && indexedRecordId !== request.recordId){
+            return {
+              status: "conflict",
+              kind: "IDENTITY_COLLISION",
+              remote: { recordId: indexedRecordId },
+              message: "Business number belongs to another recordId"
+            };
+          }
+
+          const remote = documents.get(request.recordId);
+          if(remote?.lastOperationId === request.operationId){
+            return { status: "alreadyApplied", remoteRevision: remote.revision };
+          }
+          if(remote?.deleted && !request.document.deleted){
+            return { status: "conflict", kind: "REMOTE_TOMBSTONE", remote };
+          }
+          if(remote && Number(remote.revision) > Number(request.revision)){
+            return { status: "conflict", kind: "REMOTE_REVISION_NEWER", remote };
+          }
+          if(remote && Number(remote.revision) === Number(request.revision)){
+            const comparableRemote = { ...remote };
+            delete comparableRemote.lastOperationId;
+            if(stable(comparableRemote) === stable(request.document)){
+              return { status: "alreadyApplied", remoteRevision: remote.revision };
+            }
+            return { status: "conflict", kind: "EQUAL_REVISION_CONTENT_CONFLICT", remote };
+          }
+          if(remote && Number(remote.revision) !== Number(request.baseRevision)){
+            return { status: "conflict", kind: "STALE_BASE_REVISION", remote };
+          }
+          if(!remote && Number(request.baseRevision) !== 0){
+            return { status: "conflict", kind: "STALE_BASE_REVISION", remote: null };
+          }
+
+          const stored = { ...request.document, lastOperationId: request.operationId };
+          documents.set(request.recordId, stored);
+          numberIndex.set(indexKey, request.recordId);
+          writes.push(request.operationId);
+          return { status: "applied", remoteRevision: request.revision };
+        }
+
+        return {
+          applyOperation,
+          documents,
+          numberIndex,
+          behavior,
+          writes,
+          calls,
+          defer(operationId){ behavior.set(operationId, { type: "deferred" }); },
+          release(){ if(releaseDeferred) releaseDeferred(); },
+          get deferredOperationId(){ return deferredOperationId; }
+        };
+      }
+
+      const cloud = createMockCloud();
+
+      function processor(options = {}){
+        return sync.createProcessor({
+          persistence: options.persistence || persistence,
+          cloudAdapter: cloud,
+          ownerId: options.ownerId || `test-owner-${Math.random()}`,
+          now: () => now,
+          isOnline: options.isOnline || (() => true),
+          leaseDurationMs: options.leaseDurationMs || 1000,
+          baseRetryMs: options.baseRetryMs || 100,
+          maxRetryMs: options.maxRetryMs || 800,
+          maxAttempts: options.maxAttempts || 4
+        });
+      }
+
+      async function createDocument(recordId, businessNumber, entityType = "quotation"){
+        now += 10;
+        return persistence.commitDocumentWithOutbox({
+          mode: "create",
+          recordId,
+          entityType,
+          businessNumber,
+          payload: { qno: businessNumber, client: recordId, items: [] },
+          updatedAt: now
+        });
+      }
+
+      async function operationById(operationId){
+        const operations = await persistence.listPendingOperations({
+          statuses: ["pending", "processing", "failed", "complete", "conflict", "permanent"]
+        });
+        return operations.find(operation => operation.operationId === operationId);
+      }
+
+      try{
+        await test("disposable IndexedDB readiness and version 1", async () => {
+          const ready = await persistence.ready;
+          assert(ready.ok, `Persistence was not ready: ${ready.error || "unknown"}`);
+          assert(persistence.databaseVersion === 1, "Physical database version changed");
+          assert(persistence.databaseName.startsWith("vstd-gst-calculator-test-"), "Production database name was used");
+        });
+
+        await test("successful upload and acknowledgement", async () => {
+          const created = await createDocument("sync:success", 101);
+          assert(created.operation.document.payload.client === "sync:success", "Revision snapshot was not persisted");
+          const result = await processor({ ownerId: "owner-success" }).processOnce();
+          assert(result.status === "complete", `Unexpected result: ${result.status}`);
+          const operation = await operationById(created.operation.operationId);
+          assert(operation.status === "complete" && operation.completedAt === now, "Operation was not acknowledged");
+          assert(cloud.documents.get("sync:success")?.recordId === "sync:success", "Stable remote identity was not preserved");
+        });
+
+        await test("transient failure schedules bounded backoff", async () => {
+          const created = await createDocument("sync:transient", 102);
+          cloud.behavior.set(created.operation.operationId, { type: "transient", remaining: 1 });
+          const result = await processor({ ownerId: "owner-transient" }).processOnce();
+          assert(result.status === "retryScheduled" && result.delay === 100, "First retry delay is incorrect");
+          const operation = await operationById(created.operation.operationId);
+          assert(operation.status === "failed" && operation.attempts === 1, "Retry metadata was not durable");
+          assert(operation.nextAttemptAt === now + 100 && operation.lastError.includes("Temporary"), "Retry schedule/error missing");
+        });
+
+        await test("retry resumes after processor restart", async () => {
+          const operation = (await persistence.listPendingOperations({ statuses: ["failed"] }))
+            .find(item => item.recordId === "sync:transient");
+          now = operation.nextAttemptAt;
+          const result = await processor({ ownerId: "owner-restarted" }).processOnce();
+          assert(result.status === "complete", "Restarted processor did not complete the retry");
+          assert((await operationById(operation.operationId)).attempts === 2, "Retry attempt was not counted");
+        });
+
+        await test("lost acknowledgement safely replays one cloud write", async () => {
+          const created = await createDocument("sync:ack-lost", 103);
+          let loseAcknowledgement = true;
+          const wrapper = {
+            ...persistence,
+            settleClaimedOperation(operationId, ownerId, outcome){
+              if(outcome.status === "complete" && loseAcknowledgement){
+                loseAcknowledgement = false;
+                return Promise.reject(new Error("Injected acknowledgement loss"));
+              }
+              return persistence.settleClaimedOperation(operationId, ownerId, outcome);
+            }
+          };
+          const first = await processor({ persistence: wrapper, ownerId: "owner-ack-loss" }).processOnce();
+          assert(first.status === "retryScheduled", "Lost acknowledgement was not retained for retry");
+          const failed = await operationById(created.operation.operationId);
+          now = failed.nextAttemptAt;
+          const second = await processor({ ownerId: "owner-ack-replay" }).processOnce();
+          assert(second.status === "acknowledgedReplay", "Successful remote write was not idempotently recognized");
+          assert(cloud.writes.filter(id => id === created.operation.operationId).length === 1, "Cloud write was duplicated");
+          const repeated = await processor({ ownerId: "owner-ack-repeat" }).processOnce();
+          assert(repeated.status === "idle", "Completed operation was replayed again");
+        });
+
+        await test("two processors cannot hold one active lease", async () => {
+          const created = await createDocument("sync:lease", 104);
+          cloud.defer(created.operation.operationId);
+          const firstPromise = processor({ ownerId: "owner-tab-a", leaseDurationMs: 5000 }).processOnce();
+          for(let attempt = 0; attempt < 20 && cloud.deferredOperationId !== created.operation.operationId; attempt += 1){
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          assert(cloud.deferredOperationId === created.operation.operationId, "First processor did not reach the adapter");
+          const second = await processor({ ownerId: "owner-tab-b", leaseDurationMs: 5000 }).processOnce();
+          assert(second.status === "idle", "Second processor acquired an active lease");
+          cloud.release();
+          const first = await firstPromise;
+          assert(first.status === "complete", "First leased processor did not finish");
+        });
+
+        await test("offline state does not claim or increment attempts", async () => {
+          const created = await createDocument("sync:offline", 105);
+          const result = await processor({ ownerId: "owner-offline", isOnline: () => false }).processOnce();
+          assert(result.status === "offline", "Offline processor did not stop");
+          const operation = await operationById(created.operation.operationId);
+          assert(operation.status === "pending" && operation.attempts === 0, "Offline operation was claimed");
+          const online = await processor({ ownerId: "owner-online" }).processOnce();
+          assert(online.status === "complete", "Operation did not resume online");
+        });
+
+        await test("remote identity collision becomes explicit conflict", async () => {
+          const created = await createDocument("sync:identity-local", 106);
+          cloud.numberIndex.set("quotation:106", "sync:identity-remote");
+          const result = await processor({ ownerId: "owner-identity" }).processOnce();
+          assert(result.status === "conflict" && result.conflict.kind === "IDENTITY_COLLISION", "Identity collision was not protected");
+          assert((await operationById(created.operation.operationId)).status === "conflict", "Conflict state was not durable");
+        });
+
+        await test("stale base revision becomes explicit conflict", async () => {
+          const created = await createDocument("sync:stale-base", 107);
+          await persistence.markOperationComplete(created.operation.operationId, { completedAt: now });
+          const update = await persistence.commitDocumentWithOutbox({
+            mode: "update", recordId: "sync:stale-base", entityType: "quotation", businessNumber: 107,
+            expectedRevision: 1, payload: { qno: 107, client: "revision two", items: [] }, updatedAt: ++now
+          });
+          cloud.documents.set("sync:stale-base", { ...created.document, revision: 0, baseRevision: 0, lastOperationId: "remote:old" });
+          cloud.numberIndex.set("quotation:107", "sync:stale-base");
+          const result = await processor({ ownerId: "owner-stale" }).processOnce();
+          assert(result.status === "conflict" && result.conflict.kind === "STALE_BASE_REVISION", "Stale base was not detected");
+          assert((await operationById(update.operation.operationId)).status === "conflict", "Stale operation was not quarantined");
+        });
+
+        await test("newer remote revision cannot be overwritten", async () => {
+          const created = await createDocument("sync:remote-newer", 108);
+          cloud.documents.set("sync:remote-newer", { ...created.document, revision: 3, baseRevision: 2, lastOperationId: "remote:newer" });
+          cloud.numberIndex.set("quotation:108", "sync:remote-newer");
+          const result = await processor({ ownerId: "owner-newer" }).processOnce();
+          assert(result.status === "conflict" && result.conflict.kind === "REMOTE_REVISION_NEWER", "Newer remote revision was overwritten");
+        });
+
+        await test("equal revision with different content conflicts", async () => {
+          const created = await createDocument("sync:equal-conflict", 109);
+          cloud.documents.set("sync:equal-conflict", {
+            ...created.document,
+            payload: { qno: 109, client: "Different remote content", items: [] },
+            lastOperationId: "remote:equal"
+          });
+          cloud.numberIndex.set("quotation:109", "sync:equal-conflict");
+          const result = await processor({ ownerId: "owner-equal" }).processOnce();
+          assert(result.status === "conflict" && result.conflict.kind === "EQUAL_REVISION_CONTENT_CONFLICT", "Equal-revision conflict was missed");
+        });
+
+        await test("remote tombstone blocks resurrection", async () => {
+          const created = await createDocument("sync:tombstone", 110);
+          cloud.documents.set("sync:tombstone", { ...created.document, deleted: true, lastOperationId: "remote:delete" });
+          cloud.numberIndex.set("quotation:110", "sync:tombstone");
+          const result = await processor({ ownerId: "owner-tombstone" }).processOnce();
+          assert(result.status === "conflict" && result.conflict.kind === "REMOTE_TOMBSTONE", "Remote tombstone was overwritten");
+        });
+
+        await test("multiple local revisions upload sequential snapshots", async () => {
+          const first = await createDocument("sync:revision-chain", 111);
+          const second = await persistence.commitDocumentWithOutbox({
+            mode: "update", recordId: "sync:revision-chain", entityType: "quotation", businessNumber: 111,
+            expectedRevision: 1, payload: { qno: 111, client: "revision two", items: [] }, updatedAt: ++now
+          });
+          const abandoned = await persistence.claimNextPendingOperation({
+            leaseOwner: "owner-terminated",
+            now,
+            leaseDurationMs: 100
+          });
+          assert(abandoned.operationId === first.operation.operationId, "Oldest revision was not claimed first");
+          now += 101;
+          const worker = processor({ ownerId: "owner-chain" });
+          const resultOne = await worker.processOnce();
+          const resultTwo = await worker.processOnce();
+          assert(resultOne.operation.revision === 1 && resultTwo.operation.revision === 2, "Revision chain was processed out of order");
+          assert(resultOne.operation.attempts === 2, "Expired lease was not resumed after interruption");
+          assert(first.operation.document.revision === 1 && second.operation.document.revision === 2, "Revision snapshots were not independent");
+          assert(cloud.documents.get("sync:revision-chain").revision === 2, "Remote chain did not reach revision two");
+        });
+
+        await test("conflicted intermediate revision blocks newer local revision", async () => {
+          const first = await createDocument("sync:blocked-chain", 115);
+          const second = await persistence.commitDocumentWithOutbox({
+            mode: "update", recordId: "sync:blocked-chain", entityType: "quotation", businessNumber: 115,
+            expectedRevision: 1, payload: { qno: 115, client: "blocked revision two", items: [] }, updatedAt: ++now
+          });
+          cloud.documents.set("sync:blocked-chain", { ...second.document, revision: 3, baseRevision: 2, lastOperationId: "remote:blocked-newer" });
+          cloud.numberIndex.set("quotation:115", "sync:blocked-chain");
+          const worker = processor({ ownerId: "owner-blocked-chain" });
+          const conflicted = await worker.processOnce();
+          const blocked = await worker.processOnce();
+          assert(conflicted.operation.operationId === first.operation.operationId && conflicted.status === "conflict", "Intermediate conflict was not retained");
+          assert(blocked.status === "idle", "Newer revision bypassed a conflicted predecessor");
+          assert((await operationById(second.operation.operationId)).status === "pending", "Blocked newer revision was modified");
+        });
+
+        await test("corrupted outbox operation is permanently quarantined", async () => {
+          state.corruptNextOutbox = true;
+          const created = await createDocument("sync:corrupt", 112);
+          const result = await processor({ ownerId: "owner-corrupt" }).processOnce();
+          assert(result.status === "permanent" && result.errorCode === "CORRUPT_OPERATION", "Corrupt operation was not quarantined");
+          assert((await operationById(created.operation.operationId)).status === "permanent", "Corrupt state was not durable");
+          assert(!cloud.calls.includes(created.operation.operationId), "Corrupt operation reached the cloud adapter");
+        });
+
+        await test("permanent cloud failure is not retried", async () => {
+          const created = await createDocument("sync:permanent", 113);
+          cloud.behavior.set(created.operation.operationId, { type: "permanent" });
+          const result = await processor({ ownerId: "owner-permanent" }).processOnce();
+          assert(result.status === "permanent" && result.errorCode === "PERMISSION_DENIED", "Permanent failure was not classified");
+          assert((await operationById(created.operation.operationId)).status === "permanent", "Permanent status was not stored");
+        });
+
+        await test("transient retries stop at configured maximum", async () => {
+          const created = await createDocument("sync:max-attempts", 116);
+          cloud.behavior.set(created.operation.operationId, { type: "transient", remaining: 10 });
+          const first = await processor({ ownerId: "owner-max-one", maxAttempts: 2 }).processOnce();
+          assert(first.status === "retryScheduled", "First transient failure did not schedule retry");
+          now = first.operation.nextAttemptAt;
+          const second = await processor({ ownerId: "owner-max-two", maxAttempts: 2 }).processOnce();
+          assert(second.status === "permanent" && second.errorCode === "NETWORK_ERROR", "Bounded retry did not stop");
+          assert((await operationById(created.operation.operationId)).attempts === 2, "Attempt limit count is incorrect");
+        });
+
+        await test("no production Firebase or network calls", async () => {
+          assert(state.networkCalls === 0, `Unexpected network calls: ${state.networkCalls}`);
+          assert(!String(sync.createProcessor).includes("firebase"), "Consumer contains a Firebase implementation");
+        });
+
+        output.textContent = `PASS (${results.length})\n${results.join("\n")}`;
+        document.title = `Outbox sync: PASS (${results.length})`;
+      }catch(error){
+        console.error(error);
+        output.textContent = `FAIL after ${results.length} tests\n${error.stack || error}`;
+        document.title = "Outbox sync: FAIL";
+      }finally{
+        await persistence.closeDisposableDatabase();
+        if(state.databaseName.startsWith("vstd-gst-calculator-test-")){
+          indexedDB.deleteDatabase(state.databaseName);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
